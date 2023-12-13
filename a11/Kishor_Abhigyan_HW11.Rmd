@@ -1,0 +1,1078 @@
+---
+title: "INFSCI 2595 Fall 2023 Homework: 11"
+subtitle: "Assigned November 17, 2023; Due: December 1, 2023"
+author: "Abhigyan Kishor"
+date: "Submission time: December 1, 2023 at 11:00PM EST"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Collaborators
+
+Include the names of your collaborators here.
+
+## Overview
+
+This homework begins by reviewing linear separability and why it causes issues for logistic regression models. The bulk of the assignment is dedicated to comparing binary classification models. You will train unregularized and regularized logistic regression models, neural networks, random forests, and gradient boosted trees with XGBoost.
+
+You will use the `tidyverse`, `glmnet`, `randomForest`, `xgboost`, and `caret` packages in this assignment. The `caret` package will prompt you to install `xgboost` if you do not have it installed already.
+
+**IMPORTANT**: The RMarkdown assumes you have downloaded the data sets (CSV files) to the same directory you saved the template Rmarkdown file. If you do not have the CSV files in the correct location, the data will not be loaded correctly.
+
+### IMPORTANT!!!
+
+Certain code chunks are created for you. Each code chunk has `eval=TRUE` set in the chunk options. You **MUST** change it to be `eval=TRUE` in order for the code chunks to be evaluated when rendering the document.
+
+You are free to add more code chunks if you would like.
+
+## Load packages
+
+This assignment will use packages from the `tidyverse` suite.
+
+```{r, load_packages}
+library(tidyverse)
+```
+
+This assignment also uses the `broom` package. The `broom` package is part of `tidyverse` and so you have it installed already. The `broom` package will be used via the `::` operator later in the assignment and so you do not need to load it directly.
+
+The `caret` package will be loaded later in the assignment. The `glmnet`, `randomForest`, and `xgboost` packages will be loaded via `caret`.
+
+## Problem 01
+
+The code chunk below loads the data you will work with in this assignment. The data consists of 3 inputs, `x1`, `x2` and `x3`, and one binary outcome, `y`. The `x1` and `x2` inputs are continuous while the `x3` input is categorical.
+
+```{r, read_data}
+df <- readr::read_csv('hw11_binary_train.csv', col_names = TRUE)
+```
+
+The glimpse shows the data types of the 4 variables and that there are 300 rows in the data set.
+
+```{r, show_data_glimpse}
+df %>% glimpse()
+```
+
+However, you will begin this assignment by working with a very small subset of the data. The small subset is created for you below. This small data set is created strictly to reinforce an important concept associated with logistic regression. You should **not** perform an operation like this in the final project. Again, this procedure is performed here for teaching purposes.
+
+```{r, make_small_data}
+df_small <- df %>% slice(1:21)
+
+df_small
+```
+
+The small data, `df_small`, consists of a single value for the categorical variable `x3`, as shown below.
+
+```{r, check_x3_counts_small}
+df_small %>% count(x3)
+```
+
+The larger data set, which you will work with later, has 3 balanced unique values (categories or *levels*):
+
+```{r, check_x3_counts}
+df %>% count(x3)
+```
+
+The binary outcome, `y`, is encoded as `y = 1` for the EVENT and `y = 0` for the NON-EVENT. The counts and proportions associated with the 2 unique value values of `y` are shown below for the small data set:
+
+```{r, check_y_counts_small}
+df_small %>% count(y) %>% 
+  mutate(prop = n / sum(n))
+```
+
+The counts and proportions associated with `y` on the larger data set are provided below.
+
+```{r, check_y_counts}
+df %>% count(y) %>% 
+  mutate(prop = n / sum(n))
+```
+
+Problem 01 deals with the small data set while the other problems are focused on the original larger data. The small data, `df_small`, corresponds to a single categorical value, `x3 = 'A'`, and thus you will focus on the relationship between the binary outcome, `y`, and the continuous inputs, `x1`, and `x2`, in Problem 01.
+
+### 1a)
+
+Let's start with a simple exploration of the **small** data, `df_small`.
+
+**Create scatter plots to show the relationship between the binary outcome `y` and the continuous inputs `x1` and `x2`. You may create two figures or reshape the data to long-format to support creating one figure with two facets.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+df_small %>%
+  rowid_to_column() %>%
+  pivot_longer(c(x1, x2)) %>%
+  ggplot(aes(value, y))+
+  geom_jitter(aes(color = name), height = 0.02, width = 0.02) +
+  geom_smooth(method = 'glm', method.args = list(family = 'binomial'), formula = y ~ x + I(x^2)) +
+  facet_wrap(~ name)
+```
+
+### 1b)
+
+**Based on the relationships presented in 1a), do you feel you should be concerned about linear separability in this problem?**
+
+#### SOLUTION
+
+What do you think?
+
+No I don't see a single line that can divide the data points perfectly.
+
+### 1c)
+
+Let's fit a non-Bayesian logistic regression model to see if your answer in 1b) was correct!
+
+**Fit a non-Bayesian logistic regression model to predict the binary outcome `y` based on the two continuous inputs, `x1` and `x2`. Your model must include the linear main effects and the interaction between the two continuous inputs.**
+
+**Assign the model to the `mod_small_a` variable.**
+
+*HINT*: Be careful with the `family` argument!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+mod_small_a <- glm(y ~ x1 + x2 + x1*x2, data = df_small, family = 'binomial')
+```
+
+### 1d)
+
+Let's now fit a more complicated logistic regression model. Let's include quadratic features for both `x1` and `x2`.
+
+**Fit a non-Bayesian logistic regression model using linear main effects, interactions between the two continuous inputs, and quadratic features associated with both continuous inputs.**
+
+**Assign he model to the `mod_small_b` variable.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+mod_small_b <- glm(y ~ x1 + x2 + x1*x2 + I(x1^2) + I(x2^2), data = df_small, family = 'binomial')
+```
+
+### 1e)
+
+Something might seem suspicious about the result from the model in 1d)...
+
+**Display the `summary()` of the `mod_small_b` model to the screen. Do you notice anything "extreme" about about any of the coefficient MLEs?**
+
+#### SOLUTION
+
+What do you think?
+
+```{r}
+mod_small_b %>% summary()
+```
+
+The model seems to have extremely high standard error on the estimates.
+
+### 1f)
+
+You visualized the relationship between the binary outcome, `y`, and each continuous input in 1a). However, you did not examine the behavior of `y` with respect to **both** inputs at the same time. The binary outcome can be mapped to the marker `color` and `shape` aesthetics in scatter plots between continuous inputs. Such figures allow visually identifying regions of the *joint* input space where the event occurs more frequently than other regions. Let's create such a plot to understand what happened with `mod_small_b`.
+
+**Create a scatter plot showing the relationship between the two continuous inputs. You should map the `x1` variable to the `x` aesthetic and the `x2` variable to the `y` aesthetic. Map the `color` and `shape` aesthetics to `as.factor(y)` within the appropriate geom function. Manually assign the marker `size` to be 5.**
+
+*HINT*: Do NOT use `geom_jitter()`.
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+df_small %>%
+  ggplot(aes(x1, x2, color = as.factor(y), shape = as.factor(y))) +
+  geom_point()
+```
+
+### 1g)
+
+**Why does the figure in 1f) explain the behavior of `mod_small_b`?**
+
+#### SOLUTION
+
+What do you think?
+
+There is a central area which has high concentration of events, while the outer areas have non-events.
+
+## Problem 02
+
+The remainder of the assignment will use the larger `df` data set.
+
+### 2a)
+
+It would be best to perform a full visual exploration of the data, but you will focus on the binary outcome, `y`, to continuous input relationships in this assignment. (A full exploration includes marginal distributions and conditional distributions of the variables and also examining the relationships between the inputs.)
+
+**Create scatter plots to show the relationship between the binary outcome `y` and the continuous inputs `x1` and `x2`. You may create two figures or reshape the data to long-format to support creating one figure with two facets.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+df %>%
+  rowid_to_column() %>%
+  pivot_longer(c(x1, x2)) %>%
+  ggplot(aes(value, y)) +
+  geom_jitter(aes(color = name), width = 0.02, height = 0.02) +
+  facet_wrap(~ name)
+```
+
+### 2b)
+
+Let's now consider the relationship between the binary outcome and the *joint* behavior of the continuous inputs.
+
+**Create a scatter plot showing the relationship between the two continuous inputs. You should map the `x1` variable to the `x` aesthetic and the `x2` variable to the `y` aesthetic. Map the `color` and `shape` aesthetics to `as.factor(y)` within the appropriate geom function. Manually assign the marker `size` to be 3.**
+
+*HINT*: Do NOT use `geom_jitter()`.
+
+This figure is similar to the figure in 1f) but you are using the larger data set, `df`.
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+df %>%
+  ggplot(aes(x1, x2, color = as.factor(y), shape = as.factor(y))) +
+  geom_point(size = 3)
+```
+
+### 2c)
+
+Let's now include the effect of the categorical input!
+
+**Create the same scatter plot as 2b), but this time include facets based on the categorical input `x3`. You must still use the marker `color` and `shape` aesthetics to denote the binary outcome.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+df %>%
+  ggplot(aes(x1, x2, color = as.factor(y), shape = as.factor(y))) +
+  geom_point(size = 3) + 
+  facet_wrap(~ x3)
+```
+
+### 2d)
+
+**How would you describe the behavior of the binary outcome relative to the 3 inputs, based on the figure created in 2c)?**
+
+#### SOLUTION
+
+What do you think?
+
+They have similar areas of concentration of the outcome.
+
+## Problem 03
+
+You fit multiple logistic regression models ranging from simple to complex in the previous assignment. That is the best way to go about a modeling exercise because it allows us to learn the kinds of features required to improve model behavior. We are able to build a "story" about what it takes to predict the output!
+
+However, we will just fit a single logistic regression model in this assignment. This model is relatively complex. We are "short cutting" the modeling workflow so we can focus on predictions. Later in the assignment, we will use the elastic net penalty to try to turn the complex model into a simpler model.
+
+### 3a)
+
+**Fit a non-Bayesian logistic regression model which interacts the categorical input with all linear main effects, interactions between the two continuous inputs, and quadratic features associated with both continuous inputs. Thus, ALL features derived from the continuous inputs must interact with the categorical variable.**
+
+**Assign the model to the `fit_glm` variable.**
+
+*HINT*: Be careful with the `family` argument!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+fit_glm <- glm(y ~ x3*(x1 + x2  + x1*x2 + I(x1^2) + I(x2^2)), data = df, family = 'binomial')
+```
+
+### 3b)
+
+**Are the interaction features considered statistically significant according to the non-Bayesian logistic regression model?**
+
+#### SOLUTION
+
+What do you think?
+
+```{r}
+fit_glm %>% summary()
+```
+
+Mostly no. But some interactions are significant.
+
+### 3c)
+
+Examining the coefficients is one way to try to interpret model behavior. However, we can also use predictions to visualize the relationships. This is especially helpful with binary classification problems because it allows us to visually identify regions of low event probability vs regions of high event probability.
+
+The code chunk below defines an input visualization grid for you. It is a full factorial grid between the 3 inputs. We will focus on the patterns relative to the continuous inputs, which is why there are 75 unique values for each input. The 75 x 75 input grid is repeated for each unique value of the categorical input. Thus, there are 16875 input combinations in the visualization grid. You must make 16875 predictions to study the model behavior!
+
+```{r, make_input_viz_grid}
+viz_grid <- expand.grid(x1 = seq(-3, 3, length.out=75),
+                        x2 = seq(-3, 3, length.out=75),
+                        x3 = c("A", "B", "C"),
+                        KEEP.OUT.ATTRS = FALSE, 
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()
+
+viz_grid %>% glimpse()
+```
+
+You should have fit the logistic regression model with the `glm()` function. Predictions from `glm()` fit objects are made with the `predict()` function, just like `lm()` fit models. However, *generalized* linear models make predictions for the **linear predictor** as well as the **mean output trend**. Therefore, we need to make sure we are making the predictions of the correct type of variable!
+
+You will first make predictions with the `fit_glm` model using the default arguments to `predict()`.
+
+**Predict the input visualization grid with the `fit_glm` model. The first argument to `predict()` is the model. The second argument is `newdata` and should be named in the `predict()` function call. Assign the `viz_grid` object to the `newdata` argument to ensure the input visualization grid is predicted.**
+
+**Assign the result to the `pred_viz_glm_a` variable and display the `summary()` of the `pred_viz_glm_a` to the screen.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+pred_viz_glm_a <- predict(fit_glm, newdata = viz_grid)
+pred_viz_glm_a %>% summary()
+```
+
+### 3d)
+
+The `predict()` function has additional arguments which control how the predictions are made. You will make predictions again, but this time you must include a third argument, `type`, in the `predict()` function call. You must set `type = 'response'` in the `predict()` call.
+
+**Predict the input visualization grid with the `fit_glm` model again. Use the same two arguments as in 3c) but this time include the third argument `type` with the value assigned to `'response'`.**
+
+**Assign the result to the `pred_viz_glm_b` variable and display the `summary()` of the `pred_viz_glm_b` to the screen.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+pred_viz_glm_b <- predict(fit_glm, newdata = viz_grid, type = 'response')
+pred_viz_glm_b %>% summary()
+```
+
+### 3e)
+
+You made two types of predictions. One corresponds to the linear predictor while one corresponds to the output mean trend. The output mean is the **event probability** in logistic regression problems.
+
+**Which of the two predictions, `pred_viz_glm_a` or `pred_viz_glm_b`, corresponds to the event probability? How do you know based on the two previous results?**
+
+#### SOLUTION
+
+What do you think?
+
+`pred_viz_glm_b` represents the event probability.
+
+### 3f)
+
+Let's now visualize the event probability surface with respect to the three inputs! You will made a *raster* plot to visualize the predicted probability surface with respect to the two continuous inputs faceted by the categorical variable. Raster plots will look like *images* and are possible when we have full factorial input grids.
+
+**Pipe the `viz_grid` dataframe to the `mutate()` function. Include the variable `mu` to the dataframe and assign the predicted probability to the `mu` variable. Pipe the result to `ggplot()` and map the `x1` and `x2` variables to the `x` and `y` aesthetics, respectively. Add a `geom_raster()` layer and map the `fill` aesthetic to the `mu` variable. Include facets via the `facet_wrap()` function with the facets "a function of `x3`". Lastly, specify the fill color palette via the `scale_fill_viridis_c()` function.**
+
+*HINT*: You identified which of the predictions corresponds to the event probability in 3e)!
+
+*HINT*: Don't forget about the importance of the `aes()` function!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+viz_grid %>%
+  mutate(mu = pred_viz_glm_b) %>%
+  ggplot(aes(x1, x2)) +
+  geom_raster(aes(fill = mu)) +
+  facet_wrap(~ x3) +
+  scale_fill_viridis_c()
+```
+
+### 3g)
+
+The previous figure used a sequential color palette to represent the event probability. Low probabilities are dark blue while high probabilities are bright yellow within the viridis color palette. However, event probabilities have a natural *boundary* to focus on. We want to identify the 50% probability *decision boundary* because 0.5 is the common threshold for *classifying* events in predictions.
+
+We can represent the 50% decision boundary by using a *diverging* palette. The diverging palette focuses on behavior away from a central value. One color represents increasing values from the midpoint while another color represents decreasing values from the midpoint. Classification problems have a natural midpoint value of 0.5 and thus the diverging colors will represent probabilities increasing away from 50% and probabilities decreasing away from 50%. For this problem, you should use the following syntax to create the diverging palette:
+
+```{r, show_gradient2, eval=FALSE}
+# do NOT set eval=TRUE in this code chunk!!!!
+scale_fill_gradient2(low = 'blue', mid = 'white', high = 'red',
+                     midpoint = 0.5,
+                     limits = c(0, 1))
+```
+
+The syntax specifies that the midpoint is 0.5 while the limits are 0 and 1. Values decreasing from the midpoint are represented by blue colors, while values increasing away from the midpoint are represented by red colors. The midpoint value (0.5 in this case) corresponds to white. Thus, the 50% *decision boundary* will be represented by separating blue and red regions by a white boundary!
+
+**Create the same figure as in 3f) but this time replace `scale_fill_viridis_c()` with the diverging scale.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+viz_grid %>%
+  mutate(mu = pred_viz_glm_b) %>%
+  ggplot(aes(x1, x2)) +
+  geom_raster(aes(fill = mu)) +
+  facet_wrap(~ x3) +
+  scale_fill_gradient2(low = 'blue', mid = 'white', high = 'red',
+                     midpoint = 0.5,
+                     limits = c(0, 1))
+```
+
+### 3h)
+
+**What are the general shapes of the 50% decision boundary for your model? Does the boundary shape depend on the categorical variable?**
+
+#### SOLUTION
+
+What do you think?
+
+They look elliptical, and are dependent on `x3`.
+
+## Problem 04
+
+We fit a relatively complex model in the previous problem. Let's use regularization to see if a simpler model will improve performance. You will use non-Bayesian regularization in this assignment via the `glmnet` package. You will tune the elastic net's mixing fraction, `alpha`, and regularization strength, `lambda`, via the `caret::train()` function rather than using `glmnet` directly.
+
+The `caret` package is loaded for you in the code chunk below.
+
+```{r, load_caret_pkg}
+library(caret)
+```
+
+The `caret` package prefers the binary outcome to be organized as a factor data type compared to an integer. The data set is reformatted for you in the code chunk below. The binary outcome `y` is converted to a new variable `outcome` with values `'event'` and `'non_event'`. The first level is forced to be `'event'` to be consistent with the `caret` preferred structure.
+
+```{r, make_caret_dataset}
+df_caret <- df %>% 
+  mutate(outcome = ifelse(y == 1, 'event', 'non_event')) %>% 
+  mutate(outcome = factor(outcome, levels = c("event", "non_event"))) %>% 
+  select(x1, x2, x3, outcome)
+
+df_caret %>% glimpse()
+```
+
+### 4a)
+
+You must always specify the resampling scheme and primary performance metric when using `caret`. You will use the same resampling as the previous assignment, 10 fold cross-validation with 3 repeats. You will also use the Accuracy as the primary performance metric.
+
+**Specify the resampling scheme to be 10 fold with 3 repeats. Assign the result of the `trainControl()` function to the `my_ctrl` object. Specify the primary performance metric to be `'Accuracy'` and assign that to the `my_metric` object.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+my_ctrl <- caret::trainControl(
+  method = "repeatedcv",
+  number = 10,    # Number of folds
+  repeats = 3     # Number of repeats
+)
+my_metric <- 'Accuracy'
+```
+
+### 4b)
+
+You must train, assess, and tune an elastic net model using the default `caret` tuning grid. In the `caret::train()` function you must use the formula interface to specify a model consistent with `fit_glm`. Your model must interact the categorical input with all linear main effects, interactions between the two continuous inputs, and quadratic features associated with both continuous inputs. Thus, ALL features derived from the continuous inputs must interact with the categorical variable. **Please pay close attention to your formula.** The binary outcome is now named `outcome` and **not** `y`. Assign the method argument to `'glmnet'` and set the metric argument to `my_metric`. You **must** also instruct `caret` to standardize the features by setting the `preProcess` argument equal to `c('center', 'scale')`. This will give you practice standardizing inputs even though it is not critical for this particular application. Assign the `trControl` argument to the `my_ctrl` object.
+
+**Important**: The `caret::train()` function works with the formula interface. Thus, even though you are using `glmnet` to fit the model, `caret` does not require you to organize the design matrix as required by `glmnet`! Thus, you do **NOT** need to remove the intercept when defining the formula to `caret::train()`!
+
+**Train, assess, and tune the `glmnet` elastic net model with the defined resampling scheme. Assign the result to the `enet_default` object and display the result to the screen.**
+
+**Which tuning parameter combinations are considered to be the best?**
+
+**Is the best set of tuning parameters more consistent with Lasso or Ridge regression?**
+
+#### SOLUTION
+
+The random seed is set for you for reproducibility.
+
+```{r, solution_04b}
+set.seed(1234)
+```
+
+```{r}
+enet_default <- caret::train(
+  outcome ~ x3*(x1 + x2  + x1*x2 + I(x1^2) + I(x2^2)),
+  data = df_caret,
+  method = 'glmnet',
+  trControl = my_ctrl,
+  metric = my_metric,
+  preProcess = c('center', 'scale')
+)
+```
+
+### 4c)
+
+Create a custom tuning grid to further tune the elastic net `lambda` and `alpha` tuning parameters.
+
+**Create a tuning grid with the `expand.grid()` function which has two columns named `alpha` and `lambda`. The `alpha` variable should be evenly spaced between 0.1 and 1.0 by increments of 0.1. The `lambda` variable should have 25 evenly spaced values in the log-space between the minimum and maximum `lambda` values from the caret default tuning grid. Assign the tuning grid to the `enet_grid` object.**
+
+**How many tuning parameter combinations are you trying out? How many total models will be fit assuming the 10-fold with 3-repeat resampling approach?**
+
+*HINT*: The `seq()` function includes an argument `by` to specify the increment width.
+
+*HINT*: Do not convert the `expand.grid()` result to a dataframe or tibble.
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+enet_grid <- expand.grid(alpha = seq(0.1, 1.0, by = 0.1),
+                         lambda = exp(seq(log(min(enet_default$results$lambda)),
+                          log(max(enet_default$results$lambda)),
+                          length.out = 25)))
+```
+
+How many?
+
+```{r}
+25 * 10 * 5 * 3
+```
+
+### 4d)
+
+**Train, assess, and tune the elastic net model with the custom tuning grid and assign the result to the `enet_tune` object. You should specify the arguments to `caret::train()` consistent with your solution in Problem 4b), except you should also assign `enet_grid` to the `tuneGrid` argument.**
+
+**Do not print the result to the screen. Instead use the default plot method to visualize the resampling results. Assign the `xTrans` argument to `log` in the default plot method call. Use the `$bestTune` field to print the identified best tuning parameter values to the screen. Is the identified best elastic net model more similar to Lasso or Ridge regression?**
+
+#### SOLUTION
+
+The random seed is set for you for reproducibility. You may add more code chunks if you like.
+
+```{r, solution_04d}
+set.seed(1234)
+```
+
+What do you think?
+
+```{r}
+enet_tune <- caret::train(
+  outcome ~ x3*(x1 + x2  + x1*x2 + I(x1^2) + I(x2^2)),
+  data = df_caret,
+  method = 'glmnet',
+  trControl = my_ctrl,
+  metric = my_metric,
+  preProcess = c('center', 'scale'),
+  tuneGrid = enet_grid
+)
+```
+
+### 4e)
+
+**Print the coefficients to the screen for the tuned elastic net model. Which coefficients are non-zero? Has the model been converted to a simpler model?**
+
+#### SOLUTION
+
+```{r, solution_04e}
+### add more code chunks if you'd like
+coef(enet_tune$finalModel, s = enet_tune$bestTune$lambda) %>% 
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column("coef_name") %>% 
+  tibble::as_tibble() %>% 
+  purrr::set_names(c("coef_name", "coef_value")) %>% 
+  filter(coef_value != 0)
+```
+
+What do you think?
+
+Yes, the model has been simplified because the original design matrix has 18 coefficients.
+
+### 4f)
+
+Let's visualize the predictive trends of the event probability from the tuned elastic net model. The `predict()` function for `caret` trained classifiers is different from the operation of `predict()` for `glm()` trained objects. You made predictions from `caret` trained binary classifiers in the previous assignment. The `type` argument is different for `caret` trained objects compared to `glm()` trained objects.
+
+The first argument to `predict()` for `caret` trained objects is the `caret` trained model and the second object, `newdata`, is the new data set to make predictions with. Earlier in the semester in homework 03, you made predictions from `caret` trained binary classifiers. That assignment discussed that the optional third argument `type` dictated the "type" of prediction to make. Setting `type = 'prob'` instructs the `predict()` function to return the class predicted probabilities.
+
+**Complete the code chunk below. You must make predictions on the visualization grid, `viz_grid`, using the tuned elastic net model `enet_tune`. Instruct the `predict()` function to return the probabilities by setting `type = 'prob'`.**
+
+#### SOLUTION
+
+```{r, solution_04f, eval=TRUE}
+pred_viz_enet_probs <- predict(enet_tune, newdata = viz_grid, type = 'prob')
+```
+
+### 4g)
+
+The code chunk below is completed for you. The `pred_viz_enet_probs` dataframe is column binded to the `viz_grid` dataframe. The new object, `viz_enet_df`, provides the class predicted probabilities for each input combination in the visualization grid. A glimpse is printed to the screen. Please not the `eval` flag is set to `eval=TRUE` in the code chunk below. You must change `eval` to `eval=TRUE` in the chunk options to make sure the code chunk below runs when you knit the markdown.
+
+```{r, compile_enet_pred_obj, eval=TRUE}
+viz_enet_df <- viz_grid %>% bind_cols(pred_viz_enet_probs)
+
+viz_enet_df %>% glimpse()
+```
+
+The glimpse reveals that the `event` column stores the **predicted event probability**. You must visualize the predicted probability as a faceted raster plot just like you did in 3g). You must use the diverging palette to show the 50% decision boundary.
+
+**Visualize the predicted probability from the tuned elastic net model with respect to `x1` and `x2` using `geom_raster()` faceted by `x3`. You must use the same diverging palette as 3g).**
+
+*HINT*: The event probability was named `mu` when you made the previous figure in 3g). The event probability is now named `event`!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+viz_enet_df %>%
+  ggplot(aes(x1, x2)) +
+  geom_raster(aes(fill = event)) +
+  facet_wrap(~ x3) +
+  scale_fill_gradient2(low = 'blue', mid = 'white', high = 'red',
+                     midpoint = 0.5,
+                     limits = c(0, 1))
+```
+
+### 4h)
+
+**Create a plot to show the variable importance rankings associated with the tuned elastic net model. Are the importance rankings consistent with the visualization of the predicted probability?**
+
+*HINT*: You visualized variable importance rankings from `caret` trained models in HW09.
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+enet_tune %>% varImp() %>% plot()
+```
+
+## Problem 05
+
+The data in this assignment are not challenging. The point was to demonstrate that we can train **generalized linear models** with non-linear features to learn non-linear decision boundaries! We improved the performance by *manually* deriving the non-linear features.
+
+Modern machine learning applications also involve more advanced models that do not require us to manually derive the non-linear features. Instead, the models attempt to *learn* the non-linear relationships for us. Such models can be very accurate, however these advanced models are not as easy to interpret as generalized linear models. That is why it is critical to train generalized linear models before training any advanced method like neural networks, random forests, and gradient boosted trees.
+
+Even though this is a relatively simple application, let's train several advanced methods to compare to the tuned elastic net model. This will allow us to compare the performance and predictive trends of these more advanced models to simpler and easier to interpret models. This provides context for understanding why the more advanced models out perform the simpler ones!
+
+**Important**: Each of the advanced non-linear models attempt to learn *basis functions* for us. Thus, you will not specify polynomials, or natural splines, or any other function within the formula. Instead, you should type the formula in `caret::train()` as if you are using linear additive features. The non-linear models will "create" the non-linear features for you. The `df_caret` dataframe only consists of inputs, `x1` through `x3`, and the binary outcome, `outcome`. Thus you can use the `.` "shortcut" operator to define the formula for each non-linear model:
+
+`outcome ~ .`
+
+This will save on typing **but** can only be used because the `df_caret` dataframe only contains the inputs and output. If there were other variables within the dataframe and we did not want to use then we could not use the `.` operator like that.
+
+### 5a)
+
+You will begin by training a neural network via the `nnet` package. `caret` will prompt you to install `nnet` if you do not have it installed already. Please open the R Console to "see" the prompt messages to help with the installation.
+
+You will first use the default `caret` tuning grid for `nnet`. You will train a neural network to classify the binary outcome, `outcome`, with respect to the continuous and categorical input. As previously stated, you may use the `.` "shortcut" operator in the formula to `caret::train()` to say the output is a function of "everything else" in the dataframe. Assign the `method` argument to `'nnet'` and set the `metric` argument to `my_metric`. You must also instruct `caret` to standardize the features by setting the `preProcess` argument equal to `c('center', 'scale')`. Assign the `trControl` argument to the `my_ctrl` object.
+
+You are therefore using the same resampling scheme for the neural network as you did with the elastic net model! This will allow directly comparing the neural network performance to the elastic net model!
+
+**Train, assess, and tune the `nnet` neural network with the defined resampling scheme. Assign the result to the `nnet_default` object and print the result to the screen. Which tuning parameter combinations are considered to be the best?**
+
+**IMPORTANT**: include the argument `trace = FALSE` in the `caret::train()` function call. This will make sure the `nnet` package does **NOT** print the optimization iteration results to the screen.
+
+#### SOLUTIOn
+
+The random seed is set for you for reproducibility. You may add more code chunks if you like.
+
+```{r, solution_05a}
+set.seed(1234)
+```
+
+```{r}
+nnet_default <- caret::train(outcome ~ ., data = df_caret,
+                             metric = my_metric,
+                             trControl = my_ctrl,
+                             method = 'nnet',
+                             preProcess = c('center', 'scale'), trace = FALSE)
+```
+
+### 5b)
+
+The default neural network tuning grid uses a small number of **hidden units** or *neurons*. This makes sure the default training time is relatively fast. Let's try several more complicated neural networks by adding more hidden units in the hidden layer!
+
+You must define a custom tuning grid for the neural network. This tuning grid has 2 tuning parameters, similar to the elastic net tuning grid. The first tuning parameter `size` is the number of hidden units in the hidden layer and the second tuning parameter is `decay`. The `decay` is the regularization strength of the **ridge** penalty. Thus, `nnet` is training ridge regularized neural networks!
+
+**Create a tuning grid with the `expand.grid()` function which has two columns named `size` and `decay`. The `size` variable have 4 unique values of 5, 9, 13, 17, and 21. The `decay` variable must be positive, but you will define its search grid in the log-space. You must apply the `exp()` function to 11 evenly spaced values between -6 and 0. Assign the tuning grid to the `nnet_grid` object.**
+
+**How many tuning parameter combinations will you try?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+nnet_grid <- expand.grid(size = c(5,9,13,17,21),
+                         decay = exp(seq(-6, 0, length.out = 11)))
+```
+
+```{r}
+11*5
+```
+
+### 5c)
+
+**Train, assess, and tune the `nnet` neural network with the custom tuning grid and the defined resampling scheme. Assign the result to the `nnet_tune` object. You should specify the arguments to `caret::train()` consistent with your solution in Problem 5a), except you should also assign `nnet_grid` to the `tuneGrid` argument.**
+
+**Do not print the result to the screen. Instead use the default plot method to visualize the resampling results. Assign the `xTrans` argument to `log` in the default plot method call. Use the `$bestTune` field to print the identified best tuning parameter values to the screen. How many hidden units are associated with the best model?**
+
+**IMPORTANT**: include the argument `trace = FALSE` in the `caret::train()` function call. This will make sure the `nnet` package does **NOT** print the optimization iteration results to the screen.
+
+#### SOLUTIOn
+
+The random seed is set for you for reproducibility. You may add more code chunks if you like.
+
+*PLEASE NOTE*: This code chunk may take several minutes to complete!
+
+```{r, solution_05c}
+set.seed(1234)
+```
+
+```{r}
+nnet_tune <- caret::train(outcome ~ ., data = df_caret,
+                          metric = my_metric,
+                          trControl = my_ctrl,
+                          method = 'nnet',
+                          preProcess = c('center', 'scale'),
+                          trace = FALSE,
+                          tuneGrid = nnet_grid)
+```
+
+### 5d)
+
+Let's use predictions to examine the behavior of the neural network in greater detail. You will predict the same input visualization grid, `viz_grid`, as the previous models.
+
+**Complete the code chunk below. You must make predictions on the visualization grid, `viz_grid`, using the tuned neural network model `nnet_tune`. Instruct the `predict()` function to return the probabilities by setting `type = 'prob'`.**
+
+#### SOLUTION
+
+```{r, solution_05d, eval=TRUE}
+pred_viz_nnet_probs <- predict(nnet_tune, newdata = viz_grid, type = 'prob')
+```
+
+### 5e)
+
+The code chunk below is completed for you. The `pred_viz_nnet_probs` dataframe is column binded to the `viz_grid` dataframe. The new object, `viz_nnet_df`, provides the class predicted probabilities for each input combination in the visualization grid according to the tuned neural network. A glimpse is printed to the screen. Please not the `eval` flag is set to `eval=TRUE` in the code chunk below. You must change `eval` to `eval=TRUE` in the chunk options to make sure the code chunk below runs when you knit the markdown.
+
+```{r, compile_nnet_pred_obj, eval=TRUE}
+viz_nnet_df <- viz_grid %>% bind_cols(pred_viz_nnet_probs)
+
+viz_nnet_df %>% glimpse()
+```
+
+The glimpse reveals that the `event` column stores the **predicted event probability**. You must visualize the predicted probability as a faceted raster plot just like you did in 3g). You must use the diverging palette to show the 50% decision boundary.
+
+**Visualize the predicted probability from the tuned neural network model with respect to `x1` and `x2` using `geom_raster()` faceted by `x3`. You must use the same diverging palette as 3g).**
+
+*HINT*: The event probability was named `mu` when you made the previous figure in 3g). The event probability is now named `event`!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+viz_nnet_df %>%
+  ggplot(aes(x1, x2)) +
+  geom_raster(aes(fill = event)) +
+  facet_wrap(~ x3) +
+  scale_fill_gradient2(low = 'blue', mid = 'white', high = 'red',
+                     midpoint = 0.5,
+                     limits = c(0, 1))
+```
+
+### 5f)
+
+The `caret` variable importance function can be applied to neural networks. It attempts to identify the most important inputs as viewed by the neural network.
+
+**Create a plot to show the variable importance rankings associated with the tuned neural network model. Are the importance rankings consistent with the rankings from the elastic net model?**
+
+*HINT*: You visualized variable importance rankings from `caret` trained models in HW09.
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+nnet_tune %>% varImp() %>% plot()
+```
+
+### 5g)
+
+**How does the neural network relate to the tuned elastic net model? Are the event probability predictions consistent? Are the importance inputs consistent?**
+
+#### SOLUTION
+
+What do you think?
+
+It is difficult to compare because the neural network does not show us the formula that it computes.
+
+## Problem 06
+
+Let's now fit advanced tree based models. You will start with a random forest model. You will use the default tuning grid and thus do not need to specify `tuneGrid`. Tree based models do not have the same kind of preprocessing requirements as other models. Thus, you do not need the `preProcess` argument in the `caret::train()` function call. We will discuss why that is in lecture.
+
+### 6a)
+
+**Train a random forest binary classifier by setting the `method` argument equal to `"rf"`. You must set `importance = TRUE` in the `caret::train()` function call. You may use the `.` "shortcut" operator to define the formula. Assign the result to the `rf_default` variable. Display the `rf_default` object to the screen.**
+
+**IMPORTANT**: `caret` will prompt you in the R Console to install the `randomForest` package if you do not have it. Follow the instructions.
+
+#### SOLUTION
+
+The random seed is set for you for reproducibility. You may add more code chunks if you like.
+
+*PLEASE NOTE*: This code chunk may take several minutes to complete!
+
+```{r, solution_06a}
+set.seed(1234)
+```
+
+```{r}
+rf_default <- caret::train(outcome ~ ., data = df_caret,
+                           method = 'rf',
+                           importance = TRUE,
+                           metric = my_metric,
+                           trControl = my_ctrl,
+                           trace = FALSE)
+```
+
+### 6b)
+
+Let's examine the random forest behavior through predictions.
+
+**Complete the code chunk below. You must make predictions on the visualization grid, `viz_grid`, using the random forest model ``` rf_default``. Instruct the ```predict()`function to return the probabilities by setting`type = 'prob'\`.**
+
+#### SOLUTION
+
+```{r, solution_06b, eval=TRUE}
+pred_viz_rf_probs <- predict(rf_default, newdata = viz_grid, type = 'prob')
+```
+
+### 6c)
+
+The code chunk below is completed for you. The `pred_viz_rf_probs` dataframe is column binded to the `viz_grid` dataframe. The new object, `viz_rf_df`, provides the class predicted probabilities for each input combination in the visualization grid according to the random forest model. A glimpse is printed to the screen. Please not the `eval` flag is set to `eval=TRUE` in the code chunk below. You must change `eval` to `eval=TRUE` in the chunk options to make sure the code chunk below runs when you knit the markdown.
+
+```{r, compile_rf_pred_obj, eval=TRUE}
+viz_rf_df <- viz_grid %>% bind_cols(pred_viz_rf_probs)
+
+viz_rf_df %>% glimpse()
+```
+
+The glimpse reveals that the `event` column stores the **predicted event probability**. You must visualize the predicted probability as a faceted raster plot just like you did in 3g). You must use the diverging palette to show the 50% decision boundary.
+
+**Visualize the predicted probability from the random forest model with respect to `x1` and `x2` using `geom_raster()` faceted by `x3`. You must use the same diverging palette as 3g).**
+
+*HINT*: The event probability was named `mu` when you made the previous figure in 3g). The event probability is now named `event`!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+viz_rf_df %>%
+  ggplot(aes(x1, x2)) +
+  geom_raster(aes(fill = event)) +
+  facet_wrap(~ x3) +
+  scale_fill_gradient2(low = 'blue', mid = 'white', high = 'red',
+                     midpoint = 0.5,
+                     limits = c(0, 1))
+```
+
+### 6d)
+
+You should have included `importance = TRUE` in the `caret::train()` call in 6a). This allows the random forest specific variable importance rankings to be returned.
+
+**Create a plot to show the variable importance rankings associated with the random forest model. Are the importance rankings consistent with the rankings from the elastic net model?**
+
+*HINT*: You visualized variable importance rankings from `caret` trained models in HW09.
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+rf_default %>% varImp() %>% plot()
+```
+
+## Problem 07
+
+Let's wrap up this modeling exercise by training a gradient boosted tree via XGBoost.
+
+### 7a)
+
+You will begin by using the default tuning grid from `caret`.
+
+**Train a gradient boosted tree binary classifier via XGBoost by setting the `method` argument equal to `"xgbTree"`. You should NOT include `importance = TRUE` in the `caret::train()` function call. You may use the `.` "shortcut" operator to define the formula. Assign the result to the `xgb_default` variable.**
+
+**Do not display `xgb_default` to the screen. Instead, use the default plot method to plot the performance. You do not need to set any additional arguments to the default plot method.**
+
+**Display the best tuning parameters for the gradient boosted tree to the screen.**
+
+#### SOLUTION
+
+The random seed is set for you for reproducibility. You may add more code chunks if you like.
+
+*PLEASE NOTE*: This code chunk may take several minutes to complete!
+
+**IMPORTANT**: include the argument `verbosity = 0` in the `caret::train()` function call. This will make sure the `xgBoost` package does **NOT** print a lot of warning messages to the screen. The warning messages result because the XGBoost package has included syntax changes in the most recent versions. The `caret` package uses older syntax which thus causes a large number of warning messages will be displayed to the screen.
+
+**IMPORTANT**: include the argument `nthread = 1` in the `caret::train()` function call. By default, XGBoost wants to use the MAXIMUM number of threads available on your machine. I do not know why this is the default, because this will cause your machine to become overloaded. XGBoost will therefore appear to take a very long time to complete. Instead, by setting `nthread = 1`, you are forcing XGBoost to run a single thread. You are thus forcing XGBoost to NOT run in parallel. Although this sounds like it could be slower, you will NOT overload your machine and therefore XGBoost will complete faster! Running in parallel is NOT always faster than running sequentially, especially if you OVERLOAD the computer!
+
+```{r, solution_07a}
+set.seed(1234)
+```
+
+```{r}
+xgb_default <- caret::train(outcome ~ ., data = df_caret,
+                            metric = my_metric,
+                            trControl = my_ctrl,
+                            method = 'xgbTree',
+                            verbosity = 0,
+                            nthread = 1)
+```
+
+### 7b)
+
+Let's make predictions with the gradient boosted tree like we did with the other models.
+
+**Complete the code chunk below. You must make predictions on the visualization grid, `viz_grid`, using the random forest model ``` xgb_default``. Instruct the ```predict()`function to return the probabilities by setting`type = 'prob'\`.**
+
+#### SOLUTION
+
+```{r, solution_07b, eval=TRUE}
+pred_viz_xgb_default_probs <- predict(xgb_default, newdata = viz_grid, type = 'prob')
+```
+
+### 7c)
+
+The code chunk below is completed for you. The `pred_viz_xgb_probs` dataframe is column binded to the `viz_grid` dataframe. The new object, `viz_xgb_df`, provides the class predicted probabilities for each input combination in the visualization grid according to the random forest model. A glimpse is printed to the screen. Please not the `eval` flag is set to `eval=TRUE` in the code chunk below. You must change `eval` to `eval=TRUE` in the chunk options to make sure the code chunk below runs when you knit the markdown.
+
+```{r, compile_xgb_default_pred_obj, eval=TRUE}
+viz_xgb_df <- viz_grid %>% bind_cols(pred_viz_xgb_default_probs)
+
+viz_xgb_df %>% glimpse()
+```
+
+The glimpse reveals that the `event` column stores the **predicted event probability**. You must visualize the predicted probability as a faceted raster plot just like you did in 3g). You must use the diverging palette to show the 50% decision boundary.
+
+**Visualize the predicted probability from the XGBoost model with respect to `x1` and `x2` using `geom_raster()` faceted by `x3`. You must use the same diverging palette as 3g).**
+
+*HINT*: The event probability was named `mu` when you made the previous figure in 3g). The event probability is now named `event`!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+viz_xgb_df %>%
+  ggplot(aes(x1, x2)) +
+  geom_raster(aes(fill = event)) +
+  facet_wrap(~ x3) +
+  scale_fill_gradient2(low = 'blue', mid = 'white', high = 'red',
+                     midpoint = 0.5,
+                     limits = c(0, 1))
+```
+
+### 7d)
+
+Gradient boosted trees also provide variable importance rankings.
+
+**Create a plot to show the variable importance rankings associated with the XGBoost model. Are the importance rankings consistent with the rankings from the elastic net model?**
+
+*HINT*: You visualized variable importance rankings from `caret` trained models in HW09.
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+xgb_default %>% varImp() %>% plot()
+```
+
+### 7e)
+
+You used the default XGBoost tuning grid. Let's see if we can improve the model further by using a refined tuning grid! This grid will focus on the most critical tuning parameters of the XGBoost model: the number of trees, `nrounds`, the interaction depth, `max_depth`, and the learning rate, `eta`. XGBoost has even more tuning parameters, but you will keep those fixed at values identified by the default tuning grid.
+
+The code chunk below is started for you. It defines a tuning grid via `expand.grid()` for all tuning parameters associated with XGBoost. You must complete the code chunk in order to define a tuning grid that focuses on the three most important parameters.
+
+**Complete the code chunk below. The number of trees, `nrounds`, should be a sequence from 25 to 50 in intervals of 25. The interaction depth, `max_depth`, should be a vector with values 3, 6, 9, and 129. The learning rate, `eta`, should be a vector with values equal to 0.25, 0.5, and 1 times the default grid's best `eta` value. All other tuning parameters should be set to constants equal to the identified best tuning parameter values from the default grid.**
+
+#### SOLUTION
+
+```{r, solution_07e, eval=TRUE}
+xgb_grid <- expand.grid(nrounds = seq(25, 50, by = 25),
+                        max_depth = c(3,6,9,129),
+                        eta = c(0.25, 0.5, 1) * xgb_default$bestTune$eta,
+                        gamma = xgb_default$bestTune$gamma,
+                        colsample_bytree = xgb_default$bestTune$colsample_bytree,
+                        min_child_weight = xgb_default$bestTune$min_child_weight,
+                        subsample = xgb_default$bestTune$subsample)
+```
+
+### 7f)
+
+**Train, assess, and tune the XGBoost model with the custom tuning grid and the defined resampling scheme. Assign the result to the `xgb_tune` object. You should specify the arguments to `caret::train()` consistent with your solution in Problem 7a), except you should also assign `xgb_grid` to the `tuneGrid` argument.**
+
+**Do not print the result to the screen. Instead use the default plot method to visualize the resampling results. Use the `$bestTune` field to print the identified best tuning parameter values to the screen. How many iterations or trees are associated with the best tuned model? What is the interaction depth associated with the best tuned model?**
+
+#### SOLUTIOn
+
+The random seed is set for you for reproducibility. You may add more code chunks if you like.
+
+*PLEASE NOTE*: This code chunk may take several minutes to complete!
+
+**IMPORTANT**: include the argument `verbosity = 0` in the `caret::train()` function call. This will make sure the `xgBoost` package does **NOT** print a lot of warning messages to the screen. The warning messages result because the XGBoost package has included syntax changes in the most recent versions. The `caret` package uses older syntax which thus causes a large number of warning messages will be displayed to the screen.
+
+**IMPORTANT**: include the argument `nthread = 1` in the `caret::train()` function call. By default, XGBoost wants to use the MAXIMUM number of threads available on your machine. I do not know why this is the default, because this will cause your machine to become overloaded. XGBoost will therefore appear to take a very long time to complete. Instead, by setting `nthread = 1`, you are forcing XGBoost to run a single thread. You are thus forcing XGBoost to NOT run in parallel. Although this sounds like it could be slower, you will NOT overload your machine and therefore XGBoost will complete faster! Running in parallel is NOT always faster than running sequentially, especially if you OVERLOAD the computer!
+
+```{r, solution_07f}
+set.seed(1234)
+```
+
+```{r}
+xgb_tune <- caret::train(outcome ~ ., data = df_caret,
+                            metric = my_metric,
+                            trControl = my_ctrl,
+                            method = 'xgbTree',
+                            verbosity = 0,
+                            nthread = 1,
+                            tuneGrid = xgb_grid)
+```
+
+## Problem 08
+
+Lastly, let's compare the various `caret` trained models based on our resampling scheme.
+
+### 8a)
+
+**Complete the first code chunk below which compiles the tuned elastic net, default neural network, tuned neural network, default random forest, and default XGBoost models together.**
+
+**The field names in the list state which model should be assigned.**
+
+#### SOLUTION
+
+```{r, solution_08a, eval=TRUE}
+caret_acc_compare <- resamples(list(ENET_tune = enet_tune,
+                                    NNET_default = nnet_default,
+                                    NNET_tune = nnet_tune,
+                                    RF = rf_default,
+                                    XGB_default = xgb_default,
+                                    XGB_tune = xgb_tune))
+```
+
+### 8b)
+
+Visually compare the models based on the resampled Accuracy with a dotplot.
+
+**Use the `dotplot()` function to visualize the resampled performance summary for each model. Assign the `metric` argument to `'Accuracy'` to force the `dotplot()` function to only show Accuracy.**
+
+**Which model is the best for this application?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+caret_acc_compare %>% dotplot(metric = 'Accuracy')
+```
+
+### 8c)
+
+**How would you describe the differences between the 4 types of models you trained in this application?**
+
+#### SOLUTION
+
+What do you think?

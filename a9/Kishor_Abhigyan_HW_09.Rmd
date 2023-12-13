@@ -1,0 +1,1388 @@
+---
+title: "INFSCI 2595 Fall 2023 Homework: 09"
+subtitle: "Assigned November 3, 2023; Due: November 10, 2023"
+author: "Abhigyan Kishor"
+date: "Submission time: November 10, 2023 at 11:00PM EST"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Collaborators
+
+Include the names of your collaborators here.
+
+## Overview
+
+This homework is dedicated to working with non-Bayesian regularization. You will fit your own RIDGE and LASSO penalized regression models in order to gain experience with interpreting *elastic net* model results. You will also practice *tuning* a penalized regression model by finding the *best* regularization strength, $\lambda$, value using a train/test split. You will then use the `glmnet` package and `caret` to tune elastic net models in order to identify the most important features in a model by turning off unimportant features. You will see that the programming associated with non-Bayesian models is VERY similar to the programming requried for Bayesian models! You will continue to use fundamentally important matrix operations for making predictions, while gaining a deeper understanding of how regularization prevents extreme coefficient values.
+
+This assignment will provide practice working with realistic modeling situations such as large numbers of inputs, examining the influence of correlated features, working with interactions, and working with categorical inputs.
+
+If you do not have `glmnet` or `caret` installed please download both before starting the assignment.
+
+You will also work with the `corrplot` package in this assignment. You must download and install `corrplot` before starting the assignment.
+
+**IMPORTANT**: The RMarkdown assumes you have downloaded the data sets (CSV files) to the same directory you saved the template Rmarkdown file. If you do not have the CSV files in the correct location, the data will not be loaded correctly.
+
+### IMPORTANT!!!
+
+Certain code chunks are created for you. Each code chunk has `eval=TRUE` set in the chunk options. You **MUST** change it to be `eval=TRUE` in order for the code chunks to be evaluated when rendering the document.
+
+You are free to add more code chunks if you would like.
+
+## Load packages
+
+This assignment will use packages from the `tidyverse` suite.
+
+```{r, load_packages}
+library(tidyverse)
+```
+
+This assignment also uses the `broom` package. The `broom` package is part of `tidyverse` and so you have it installed already. The `broom` package will be used via the `::` operator later in the assignment and so you do not need to load it directly.
+
+The `glmnet` package will be loaded later in the assignment. As stated previously, please download and install `glmnet` if you do not currently have it.
+
+## Problem 01
+
+You will gain experience with non-Bayesian Ridge and Lasso regression by working with a large number of inputs in this problem. The training data are loaded for you below.
+
+```{r, read_data_A}
+dfA_train <- readr::read_csv('hw09_probA_train.csv', col_names = TRUE)
+```
+
+```{r}
+model.matrix(y ~ (x01 + x02 + x03)^3, data = dfA_train)
+```
+
+All input variables have names that start with `x` and the output is named `y`. The glimpse provided below shows there are many input columns!
+
+```{r, show_glimpse_A}
+dfA_train %>% glimpse()
+```
+
+The data are reshaped for you into *long-format*. The output `y` is preserved and all input columns are "stacked" on top of each other. The `name` column provides the input's name and the `value` column is the value of the input. The `input_id` column is created for you. It stores the input ID as an integer instead of a string. The `stringr` package is part of `tidyverse`.
+
+```{r, make_longformat_a}
+lfA_train <- dfA_train %>% 
+  tibble::rowid_to_column() %>% 
+  pivot_longer(starts_with('x')) %>% 
+  mutate(input_id = as.numeric(stringr::str_extract(name, '\\d+')))
+lfA_train
+```
+
+### 1a)
+
+It is always important to explore data before modeling. You will use **regularized regression** models in this assignment. Regularized regression requires that all features have roughly the same scale in order for the **regularization strength** to have the same influence.
+
+**Use a boxplot to check if all inputs have roughly the same scale. Pipe the long-format data, `lfA_train` to `ggplot()` and map the `input_id` to the `x` aesthetic and the `value` to the `y` aesthetic. Add the `geom_boxplot()` layer and map the `input_id` to the `group` aesthetic.**
+
+**How do the scales compare across the inputs?**
+
+*HINT*: Remember the importance of the `aes()` function!
+
+#### SOLUTION
+
+Add your code chunk here.
+
+```{r}
+lfA_train %>%
+  ggplot(mapping = aes(x = input_id, y = value)) +
+  geom_boxplot(mapping = aes(group = input_id))
+```
+
+### 1b)
+
+Let's now visualize the relationship between the output, `y`, and each input. Each input will be associated with a facet, but you will still need to show several figures because there are so many inputs in this problem.
+
+**Create a scatter plot to show the relationship between the output and each input. Use facets for each input.**
+
+**In the first code chunk, pipe the long-format data to `filter()` and keep all rows where `input_id` is less than 26. Pipe the result to `ggplot()` and map `value` to the `x` aesthetic and map `y` to the `y` aesthetic. Add the appropriate geom to make the scatter plot and add a `facet_wrap()` layer with the facets "as a function" of `name`.**
+
+**In the second code chunk, pipe the long-format data to `filter()` and keep all rows where `input_id` is between 26 and 50. Use the same aesthetics and facet structure as the first code chunk.**
+
+**In the third code chunk, pipe the long-format data to `filter()` and keep all rows where `input_id` is greater than 50. Use the same aesthetics and facet structure as the first code chunk.**
+
+**Set the `alpha` to 0.33 in all three scatter plots.**
+
+*HINT*: The `between()` function can help you here...
+
+#### SOLUTION
+
+```{r, solution_01b_1}
+### the first 25 inputs
+lfA_train %>%
+  filter(input_id < 26) %>%
+  ggplot(mapping = aes(x = value, y = y)) +
+  geom_point (alpha = 0.33) +
+  facet_wrap(~ name)
+```
+
+```{r, solution_01b_2}
+### inputs between 26 and 50
+lfA_train %>%
+  filter(input_id > 25) %>%
+  filter(input_id < 51) %>%
+  ggplot(mapping = aes(x = value, y = y)) +
+  geom_point (alpha = 0.33) +
+  facet_wrap(~ name)
+```
+
+```{r, solution_01b_3}
+### last 25 inputs
+lfA_train %>%
+  filter(input_id > 50) %>%
+  ggplot(mapping = aes(x = value, y = y)) +
+  geom_point (alpha = 0.33) +
+  facet_wrap(~ name)
+```
+
+### 1c)
+
+**Based your previous figures, which inputs seem related to the output?**
+
+#### SOLUTION
+
+What do you think?
+
+### 1d)
+
+You visualized the output to input relationships, but you must also examine the relationship between the inputs! The `cor()` function can be used to calculate the correlation matrix between all columns in a data frame.
+
+Correlation matrices are created from wide-format data and so you will use the original wide-format data, `dfA_train`, for this question instead of the long-format data, `lfA_train`. However, you already know there are many inputs to this problem. Thus, you will **not** display the correlation matrix between all inputs. Instead, you will visualize the correlation matrix as a heat map. This type of plot is typically referred to as the **correlation plot**. Let's create a correlation plot to visualize the correlation coefficient between each pair of inputs. The `corrplot` package provides the `corrplot()` function to easily create clean and simple correlation plots. You do not have to load or import the `corrplot` package, instead you will call the `corrplot()` function from `corrplot` using the `::` operator. Thus, you will call the function as `corrplot::corrplot()`.
+
+The first argument to `corrplot::corrplot()` is a correlation matrix. You must therefore calculate the correlation matrix associated with a data frame and pass that matrix into `corrplot::corrplot()`. You will create the default correlation plot from `corrplot()`. You will gain more experience with correlation plots later in this assignment.
+
+**Pipe `dfA_train` into `select()` and select all columns EXCEPT the response `y`. Pipe the result to the `cor()` function and then pipe the result to the `corrplot::corrplot()` function.**
+
+#### SOLUTION
+
+Add your code chunk here.
+
+```{r}
+dfA_train %>%
+  select(-c('y')) %>%
+  cor() %>%
+  corrplot::corrplot()
+```
+
+### 1e)
+
+**Based on your correlation plot in 1d), do you think the inputs are highly correlated?**
+
+#### SOLUTION
+
+What do you think?
+
+### 1f)
+
+Let's fit a non-Bayesian linear model by maximizing the likelihood. You do not have program the model from scratch. Instead, you are allowed to use `lm()` to fit the model.
+
+**Fit a linear model by maximizing the likelihood using linear additive features for all inputs.**
+
+**You must use the original wide-format data, `dfA_train`.**
+
+**Assign the model to the `modA` object.**
+
+#### SOLUTION
+
+Add your code chunk here.
+
+```{r}
+modA <- lm(y ~ ., data = dfA_train)
+```
+
+### 1g)
+
+**Use the `coefplot::coefplot()` function to visualize the coefficient summaries for your linear additive features model.**
+
+#### SOLUTION
+
+Add your code chunk here.
+
+```{r}
+coefplot::coefplot(modA)
+```
+
+### 1h)
+
+There are other ways to examine the coefficient summaries besides the coefficient plot visualization. The `broom` package has multiple functions which can help interpret model behavior. The `broom` package organizes model results into easy to manipulate TIDY dataframes. You will use the `broom::tidy()` function to examine the coefficient summaries. Applying the `broom::tidy()` function to an `lm()` model object produces a dataframe. One row is one coefficient. The `term` column is the name of feature the coefficient is applied to and the other columns provide different statistics about the coefficient. You can use any other `tidyverse` function, such as `select()`, `filter()`, `count()`, and others to manipulate the `broom::tidy()` returned dataframe!
+
+Non-Bayesians focus on the p-value (`p.value` column from `broom::tidy()`) to identify if the feature is statistically significant.
+
+**Use `broom::tidy()` to identify which inputs non-Bayesians will identify as being statistically significant.**
+
+*HINT*: The common convention for statistical significance is 0.05...
+
+#### SOLUTION
+
+Add your code chunk here.
+
+```{r}
+broom::tidy(modA) %>%
+  filter(p.value >= 0.05)
+```
+
+## Problem 02
+
+You have explored the data and fit the first un-regularized non-Bayesian model. You have examined the statistically significant features, but now you must use regularized regression to identify the important features. Regularized regression is an important tool for "turning off" unimportant features in models. Regularized regression is especially useful when there are many features, as with this application. Consider for example that you are working at a startup company that produces components for medical devices. Your company makes the components with Additive Manufacturing (3D printing) and are trying to maximize the longevity of the printed part. Additive Manufacturing involves many different features that control the performance of a component. The company has tracked variables associated with the supplied material, the operation of the printer, and measured features associated with the printed objects. The company identified 75 inputs they think impact a Key Performance Indicator (KPI). It is your job to identify the most important inputs that influence the output!
+
+This may seem like a daunting task, but that is where regularized regression can help! In lecture we introduced non-Bayesian regularized regression by stating the regression coefficients, the $\boldsymbol{\beta}'s$, are estimated by minimizing the following loss function:
+
+$$ 
+SSE + \lambda \times penalty
+$$
+
+The $penalty$ formulation depends on if we are using Ridge or Lasso regression. However, in this assignment we will work with a slightly different loss function. We will work with the loss function consistent with the `glmnet` package:
+
+$$ 
+\frac{1}{2} MSE + \lambda \times penalty
+$$
+
+This does not change the concepts discussed in lecture. It simply changes the magnitude of the **regularization strength** parameter, $\lambda$. As an aside, this demonstrates why I prefer the Bayesian interpretation of regularization. The regularization is more interpretable in the Bayesian setting. The regularization is the **prior standard deviation** which controls the allowable range on the coefficients. But that is a philosophical debate for another time!
+
+You must program the regularized loss function yourself, rather than using `glmnet` to fit the regularized regression model! This will highlight how the regularization strength is applied and how it relates to the SSE (or MSE). This problem deals with programming the **RIDGE** penalty and comparing the resulting **RIDGE** estimates to the coefficient MLEs.
+
+### 2a)
+
+You will program the Ridge loss function in a manner consistent with the log-posterior functions from previous assignments. You must create an initial list of required information before you program the function. This will allow you to test your function to make sure you programmed it correctly.
+
+**Complete the code chunk below by filling in the fields to the list of required information. The `$yobs` field is the "regular" R vector for the output. The `$design_matrix` is the design matrix for the problem. The `$lambda` field is the regularization strength,** $\lambda$.
+
+**You must use the original wide format `dfA_train` to specify the output and create the design matrix. The design matrix must be made consistent with how we have organized design matrices in lecture and thus must include the "intercept column of 1s". Your design matrix should use linear additive features for all inputs. Lastly, set the regularization strength to 1.**
+
+#### SOLUTION
+
+```{r, solution_02a, eval=TRUE}
+check_info_A <- list(
+  yobs = dfA_train$y,
+  design_matrix = model.matrix(y ~ ., data = dfA_train),
+  lambda = 1
+)
+```
+
+### 2b)
+
+The function, `loss_ridge()`, is started for you in the code chunk below. The `loss_ridge()` function consists of two arguments. The first, `betas`, is the "regular" R vector of the regression coefficients and the second, `my_info`, is the list of required information. You must assume that `my_info` contains fields you specified in the `check_info_A` list in the previous problem.
+
+**Complete the code chunk below by calculating the mean trend, the model's mean squared error (MSE) on the training set, the RIDGE penalty, lastly return the effective Ridge loss. The comments and variable names below state what you should calculate at each line.**
+
+**To check if you programmed `loss_ridge()` correctly**, test the function with a guess of -1.2 for all regression coefficients. If you programmed `loss_ridge()` correctly you should get a value of 287.3114. As another test, use 0.2 for all regression coefficients. If you programmed `loss_ridge()` correctly you should get a value of 111.2219.
+
+#### SOLUTION
+
+```{r, solution_02b, eval=TRUE}
+loss_ridge <- function(betas, my_info)
+{
+  # extract the design matrix
+  X <- my_info$design_matrix
+  
+  # calculate linear predictor
+  
+  mu <- X %*% (betas %>% as.matrix()) 
+  
+  # calculate MSE
+  MSE <- sum((my_info$y - mu)^2) / length(my_info$y)
+  
+  # calculate ridge penalty
+  penalty <- sum(betas^2)
+  
+  # return effective total loss
+  MSE * 0.5 + my_info$lambda * penalty
+}
+```
+
+Test `loss_ridge()` with -1.2 for all regression coefficients.
+
+```{r}
+loss_ridge(rnorm(check_info_A$design_matrix %>% ncol(), mean = -1.2, sd = 0), check_info_A)
+```
+
+Test `loss_ridge()` with 0.2 for all regression coefficients.
+
+```{r}
+loss_ridge(rnorm(check_info_A$design_matrix %>% ncol(), mean = 0.2, sd = 0), check_info_A)
+```
+
+### 2c)
+
+You will use the `optim()` function to manage the optimization and thus fitting of the Ridge regression model. In truth, Ridge regression has a closed form analytic expression for the $\boldsymbol{\beta}$ estimates! The formula has a lot in common with the Bayesian posterior mean formula assuming a known $\sigma$! However, we will focus on executing and interpreting the results rather than the mathematical derivation in this assignment.
+
+You must define a function, `fit_regularized_regression()`, to manage the optimization for you. This function will be general and not specific to Ridge regression. This way you can use this same function later in the assignment to fit the Lasso regression model. The `fit_regularized_regression()` function is started for you in the code chunk below and has three arguments. The first, `lambda_use`, is the assumed regularization strength parameter value. The second, `loss_func`, is a function handle for the loss function you are using to estimate the coefficients, and the third argument, `my_info`, is the list of required information.
+
+The `my_info` argument is different from `check_info_A` you defined previously. The `my_info` argument in `fit_regularized_regression()` does NOT include `$lambda`. Instead, you must assign `lambda_use` to the `$lambda` field. The purpose of `fit_regularized_regression()` is to allow iterating over many different values for $\lambda$.
+
+The bulk of `fit_regularized_regression()` is calling `optim()` to execute the optimization. You must specify the arguments correctly to the `optim()` function. Please note that you are **minimizing** the loss and so you should **not** specify `fnscale` in the `control` argument to `optim()`.
+
+The last portion of `fit_regularized_regression()` is a book keeping step which organizes the coefficient estimates in a manner consistent with the `broom::tidy()` function.
+
+**Complete the code chunk below by specifying the initial guess as 0 for all regression coefficients, assigning `lambda_use` to the `$lambda` field, complete the arguments to the `optim()` call, and complete the book keeping correctly. The `estimate` column in the returned `tibble` is the optimized estimate for the coefficients. The `term` column in the returned `tibble` is the coefficient name. You do NOT need to return the Hessian matrix from `optim()` and you should specify the `method` is `'BFGS"` and the maximum number of iterations is 5001.**
+
+*HINT*: How can you identify the feature names associated with each coefficient?
+
+*HINT*: Which of the returned elements from `optim()` correspond to the optimized estimates?
+
+#### SOLUTION
+
+```{r, solution_02c, eval=TRUE}
+fit_regularized_regression <- function(lambda_use, loss_func, my_info)
+{
+  # create the initial guess of all zeros
+  start_guess <- rep(0, times = my_info$design_matrix %>% ncol())
+  
+  # add the regularization strength to the list of required information
+  my_info$lambda <- lambda_use
+  
+  fit <- optim(start_guess,
+               loss_func,
+               NULL,
+               my_info,
+               method = 'BFGS',
+               control = list(maxit = 5001))
+  
+  #return the regularized beta estimates
+  tibble::tibble(
+    term = check_info_A$design_matrix %>% colnames(),
+    estimate = fit$par
+  ) %>%
+    mutate(lambda = lambda_use)
+}
+
+```
+
+```{r}
+fit_regularized_regression(1, loss_ridge, check_info_A)
+```
+
+### 2d)
+
+You need to specify a new list of required information that only contains the output and design matrix in order to test the `fit_regularized_regression()` function.
+
+**Complete the first code chunk below by filling in the fields to the list of required information. The `$yobs` field is the "regular" R vector for the output. The `$design_matrix` is the design matrix for the problem. You must use the original wide format `dfA_train` to specify the output and create the design matrix and you use should linear additive features for all inputs.**
+
+**Complete the second code chunk below by fitting the Ridge regularized model with a low regularization strength value of 0.0001. Assign the result to the `check_ridge_fit_lowpenalty` object. Display the `glimpse()` of `check_ridge_fit_lowpenalty` to the screen.**
+
+#### SOLUTION
+
+```{r, solution_02d_1, eval=TRUE}
+reg_info <- list(
+  yobs = dfA_train$y,
+  design_matrix = model.matrix(y ~ ., data = dfA_train)
+)
+```
+
+Fit the Ridge model with a regularization strength of 0.0001.
+
+Add your code chunk here.
+
+```{r}
+check_ridge_fit_lowpenalty <- fit_regularized_regression(0.0001, loss_ridge, reg_info)
+```
+
+### 2e)
+
+The code chunk below is completed for you. It defines a function, `viz_compare_to_mles()`, which compares the regularized coefficient estimates to the MLEs. The first argument is a dataframe (tibble) returned from the `fit_regularized_regression()` function. The second argument is an `lm()` model object.
+
+```{r, make_viz_coef_compare_function}
+### create function to visualize the coefficient estimates
+viz_compare_to_mles <- function(regularized_estimates, lm_mod)
+{
+  regularized_estimates %>% 
+    left_join(broom::tidy(lm_mod) %>% 
+                select(term, mle = estimate),
+              by = 'term') %>% 
+    pivot_longer(c("estimate", "mle")) %>% 
+    filter(term != '(Intercept)') %>% 
+    ggplot(mapping = aes(y = value, x = term)) +
+    geom_hline(yintercept = 0, color = 'grey30', 
+               size = 1.2, linetype = 'dashed') +
+    stat_summary(geom = 'linerange',
+                 fun.max = 'max', fun.min = 'min',
+                 mapping = aes(group = term),
+                 color = 'black', size = 1) +
+    geom_point(mapping = aes(color = name,
+                             shape = name)) +
+    coord_flip() +
+    scale_shape_discrete('', solid = FALSE) +
+    scale_color_brewer('', palette = 'Set1') +
+    labs(y = 'coefficient estimate', x = 'coefficient') +
+    theme_bw()
+}
+```
+
+**Use the `viz_compare_to_mles()` function to compare the Ridge regularized coefficients with the low** $\lambda$ value to the coefficient MLEs.
+
+**How do they compare?**
+
+#### SOLUTION
+
+Add your code chunk here.
+
+```{r}
+viz_compare_to_mles(check_ridge_fit_lowpenalty, modA)
+```
+
+How do the coefficients compare?
+
+They are very close to mle values.
+
+### 2f)
+
+Let's now try a high regularization strength of 10000 and see the impact on the coefficient estimates.
+
+**Use the `fit_regularized_regression()` to fit the Ridge regression model with a** $\lambda$ value of 10000. Assign the result to the `check_ridge_fit_highpenalty` object. Use the `viz_compare_to_mles()` function to compare the high penalized Ridge coefficient estimates to the MLEs.
+
+**How do the high penalized estimates compare the MLEs?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+How do they coefficients compare to the MLEs?
+
+The coefficients are very far from mle.
+
+```{r}
+check_ridge_fit_highpenalty <- fit_regularized_regression(10000, loss_ridge, reg_info)
+viz_compare_to_mles(check_ridge_fit_highpenalty, modA)
+```
+
+### 2g)
+
+The first argument to the `fit_regularized_regression()` function was intentionally set to `lambda_use` to allow iterating over a sequence of $\lambda$ values. This allows us to try out dozens to hundreds of candidate $\lambda$ values and see the regularization effect on the coefficient estimates.
+
+However, you must first create a sequence of candidate $\lambda$ values to iterate over!
+
+**Define a sequence of lambda values and assign the result to the `lambda_grid` variable in the first code chunk below. The grid should be 101 evenly spaced points in the natural log scale. The values in `lambda_grid` however must be in the original** $\lambda$ scale and thus NOT in the log-scale. The lower bound should correspond to $\lambda = 0.0001$ and the upper bound should correspond to $\lambda = 10000$.
+
+**The second code chunk executes the iteration for you with the `purrr::map_dfr()` function. The `map_dfr()` function applies the `fit_regularized_regression()` function to each unique value in the `lambda_grid` vector.**
+
+#### SOLUTION
+
+```{r, solution_02g_1, eval=TRUE}
+lambda_grid <- exp(seq(from = log(0.0001), to = log(10000), length.out = 101))
+```
+
+The `eval` flag is set to FALSE in the code chunk arguments below. Set `eval=TRUE` once you have properly defined `lambda_grid`.
+
+**Please note**: The code chunk below may take a few minutes to complete.
+
+```{r, solution_02g_2, eval=TRUE}
+ridge_path_results <- purrr::map_dfr(lambda_grid,
+                                     fit_regularized_regression,
+                                     loss_func = loss_ridge,
+                                     my_info = reg_info)
+```
+
+### 2h)
+
+It's now time to visualize the **coefficient path** for the Ridge regression model! The code chunk below is started for you. The Intercept is removed to be consistent with the coefficient path visualizations created by `glmnet` package.
+
+**Complete the code chunk below by piping the dataframe to `ggplot()`. Map the `log(lambda)` to the `x` aesthetic and the `estimate` to the `y` aesthetic. Include a `geom_line()` layer and map the `term` variable to the `group` aesthetic within `geom_line()`. Set the `alpha` to 0.33.**
+
+#### SOLUTION
+
+```{r, solution_02h, eval=TRUE}
+ridge_path_results %>% 
+  filter(term != '(Intercept)') %>% 
+  ggplot(mapping = aes(x = log(lambda), y = estimate)) + 
+  geom_line(mapping = aes(group = term), alpha = 0.33)
+```
+
+### 2i)
+
+**Describe the behavior of the coefficient paths as the regularization strength increases in the plot shown in 2h).**
+
+#### SOLUTION
+
+What do you think?
+
+## Problem 03
+
+As discussed in lecture the Ridge penalty is analogous to applying independent Gaussian priors in Bayesian linear models! However, the regularization penalty can take other forms besides the Ridge penalty. The **LASSO** penalty behaves differently than Ridge. This problem is focused on applying the Lasso penalty and comparing it to the behavior of the Ridge penalty.
+
+You will begin by defining a loss function similar to the `loss_ridge()` function you defined earlier. You will then use this new function, `loss_lasso()`, to fit the Lasso regression model.
+
+### 3a)
+
+The function, `loss_lasso()`, is started for you in the code chunk below. The `loss_lasso()` function has the same structure as the `loss_ridge()` function and thus has 2 arguments. The first, `betas`, is the "regular" R vector of the regression coefficients and the second, `my_info`, is the list of required information. You must assume that `my_info` contains the same fields as the `my_info` list used within `loss_ridge()`.
+
+**Complete the code chunk below by calculating the mean trend, the model's mean squared error (MSE) on the training set, the LASSO penalty, lastly return the effective Lasso loss. The comments and variable names below state what you should calculate at each line.**
+
+**To check if you programmed `loss_lasso()` correctly**, test the function with a guess of -1.2 for all regression coefficients and use the `check_info_A` list defined earlier. If you programmed `loss_lasso()` correctly you should get a value of 269.0714. As another test, use 0.2 for all regression coefficients and use the `check_info_A` list defined earlier. If you programmed `loss_lasso()` correctly you should get a value of 123.3819.
+
+#### SOLUTION
+
+```{r, solution_03a_1, eval=TRUE}
+loss_lasso <- function(betas, my_info)
+{
+  # extract the design matrix
+  X <- my_info$design_matrix
+  
+  # calculate linear predictor
+  mu <- X %*% (betas %>% as.matrix())
+  
+  # calculate MSE
+  MSE <- sum((my_info$y - mu) ^ 2) / (length(my_info$y))
+  
+  # calculate LASSO penalty
+  penalty <- sum(abs(betas))
+  
+  # return effective total loss
+  MSE * 0.5 + my_info$lambda * penalty
+}
+```
+
+Test `loss_lasso()` with -1.2 for all regression coefficients.
+
+```{r}
+loss_lasso(rep(-1.2, times = check_info_A$design_matrix %>% ncol()), check_info_A)
+```
+
+Test `loss_lasso()` with 0.2 for all regression coefficients.
+
+```{r}
+loss_lasso(rep(0.2, times = check_info_A$design_matrix %>% ncol()), check_info_A)
+```
+
+### 3b)
+
+You now have everything ready to fit the Lasso regression model! The `fit_regularized_regression()` function was defined to be general. You should use `fit_regularized_regression()` to fit the Lasso model by assigning `loss_lasso` to the `loss_func` argument. You must use the `reg_info` list as the `my_info` argument. The user supplied `lambda_use` value will then be used as the regularization strength applied to the Lasso penalty.
+
+**Fit the Lasso regression model with a low penalty of 0.0001 and assign the result to the `check_lasso_fit_lowpenalty` object.**
+
+**After fitting, use the `viz_compare_to_mles()` function to compare the Lasso estimates to the MLEs.**
+
+**How do the Lasso estimates compare to the MLEs?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+check_lasso_fit_lowpenalty <- fit_regularized_regression(0.0001, loss_lasso, reg_info)
+```
+
+```{r}
+viz_compare_to_mles(check_lasso_fit_lowpenalty, modA)
+```
+
+How do they compare?
+
+They are very close to mle, even more than with previous ridge method.
+
+### 3c)
+
+Next, let's examine how a strong Lasso penalty impacts the coefficients.
+
+**Fit the Lasso regression model again but this time with a high penalty of 10000 and assign the result to the `check_lasso_fit_highpenalty` object.**
+
+**After fitting, use the `viz_compare_to_mles()` function to compare the Lasso estimates to the MLEs.**
+
+**How do the Lasso estimates compare to the MLEs?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+check_lasso_fit_highpenalty <- fit_regularized_regression(10000, loss_lasso, reg_info)
+```
+
+```{r}
+viz_compare_to_mles(check_lasso_fit_highpenalty, modA)
+```
+
+They are now completely normalized.
+
+### 3d)
+
+Previously, you defined a sequence of $\lambda$ values and assigned those values to the `lambda_grid` object. This sequence serves the role as a candidate **search grid**. We do not know the best $\lambda$ to use so we try out many values! The code chunk below is completed for you. The `eval` flag is set to FALSE and so you must set `eval=TRUE` in the code chunk options. The Lasso regression model is fit for each $\lambda$ value in the search grid and the coefficient estimates are returned within a dataframe (tibble). The `lasso_path_results` dataframe includes the `lambda` value, just as the `ridge_path_results` object included the `lambda` value previously.
+
+**Please note**: The code chunk below may take a few minutes to complete.
+
+```{r, solution_03d_1, eval=TRUE}
+lasso_path_results <- purrr::map_dfr(lambda_grid,
+                                     fit_regularized_regression,
+                                     loss_func = loss_lasso,
+                                     my_info = reg_info)
+```
+
+You will use the `lasso_path_results` to visualize the Lasso **coefficient path**. As with the Ridge coefficient path from earlier in the assignment, the Intercept is removed for you to be consistent with the `glmnet` path visualizations.
+
+**Complete the code chunk below by piping the dataframe to `ggplot()`. Map the `log(lambda)` to the `x` aesthetic and the `estimate` to the `y` aesthetic. Include a `geom_line()` layer and map the `term` variable to the `group` aesthetic within `geom_line()`. Set the `alpha` to 0.33.**
+
+**How does the figure below compare to the figure created in Problem 2h)? How are the Lasso paths different from the Ridge paths?**
+
+#### SOLUTION
+
+```{r, solution_03d_2, eval=TRUE}
+lasso_path_results %>% 
+  filter(term != '(Intercept)') %>% 
+  ggplot(mapping = aes(x = log(lambda), y = estimate)) +
+  geom_line(mapping = aes(group = term), alpha = 0.33)
+```
+
+What do you think?
+
+The lasso path actually converges to 0 and it converges very quickly compared to ridge.
+
+## Problem 04
+
+Now that you have studied the behavior of the Ridge and Lasso penalties in greater depth, it's time to tune the regularization strength. You will tune the regularization strength just for the Lasso model. The steps are the same for the Ridge model, but we will focus on Lasso in this question.
+
+The code chunk below reads in another data set for you. This data set is a random test split from the same data the training set was created from. You will thus use this data set as the hold-out test set to assess or evaluate the Lasso model for each regularization strength in the search grid.
+
+```{r, read_data_A_test}
+dfA_test <- readr::read_csv('hw09_probA_test.csv', col_names = TRUE)
+```
+
+A glimpse is provided below to show the variable names are the same as those in `dfA_train`.
+
+```{r, show_A_test_glimpse}
+dfA_test %>% glimpse()
+```
+
+You will execute fitting the Lasso model on the training set and then testing the Lasso model on the hold-out test set. You will "score" the model by calculating the hold-out test MSE for each $\lambda$ value in the search grid. You already fit the Lasso model on the training set, `dfA_train`, for each value in `lambda_grid`. However, you will create a function, `train_and_test_regularized()`, which executes both the training and testing actions. Thus, your function, `train_and_test_regularized()`, will do everything required to evaluate the model performance. Your function is therefore analogous to the `cv.glmnet()` function, the `caret::train()` function, and the training and testing functions within `tidymodels`!
+
+### 4a)
+
+The `train_and_test_regularized()` function is started for you in the code chunk below. It consists of 4 arguments. The first, `lambda_use`, is the user specified regularization strength. The second, `train_data`, is the training data set. The third, `test_data`, is the hold-out test data set. The last argument, `loss_func`, is the loss function used to fit the model. Notice that you do not provide the lists of required information to `train_and_test_regularized()`. Instead, the data are provided and `train_and_test_regularized()` defines the list of required information!
+
+**It is important** to note that the we need to standardize the training data before fitting regularized models. The testing data must then be standardized **based on** the training data. The `dfA_test` data provided to you has already been appropriately pre-processed and so you do not need to worry about that here. This lets you focus on training and assessing the model performance.
+
+**Complete the code chunk below to define the `train_and_test_regularized()` function. The comments and variable names state the actions you should perform within each line of code.**
+
+**Remember that we are working with linear additive features for all inputs.**
+
+*HINT*: Remember that you defined a function to allow fitting the model for a given $\lambda$ value previously...
+
+#### SOLUTION
+
+```{r, solution_04a_1, eval=TRUE}
+train_and_test_regularized <- function(lambda_use, train_data, test_data, loss_func)
+{
+  # make design matrix on TRAINING set
+  Xtrain <- model.matrix(y ~ . , data = train_data)
+  
+  # make list of required information for the TRAINING set
+  info_train <- list(
+    yobs = train_data$y,
+    design_matrix = Xtrain
+  )
+  
+  # train the model
+  train_results <- fit_regularized_regression(lambda_use, loss_func, info_train)
+  
+  # extract the training set coefficient estimates (completed for you)
+  beta_estimates <- train_results %>% pull(estimate)
+  
+  # make the design matrix on the TEST set
+  Xtest <- model.matrix(y ~ ., data = test_data)
+  
+  # predict the trend on the TEST data
+  mu_test <- Xtest %*% (beta_estimates %>% as.matrix())
+  
+  # calculate the MSE on the TEST set
+  MSE_test <- sum((test_data$y - mu_test)^2) / length(test_data$y)
+  
+  # book keeping (completed for you)
+  list(lambda = lambda_use,
+       MSE_test = MSE_test)
+}
+```
+
+### 4b)
+
+The code chunk below is completed for you. It applies the `train_and_test_regularized()` function to each $\lambda$ value in the `lambda_grid` search grid. The `loss_lasso` function is assigned to the `loss_func` argument and thus the Lasso model is trained and tested for each regularization strength candidate value. The `eval` flag is set to FALSE and so you must set `eval=TRUE` in the code chunk options.
+
+**Please note**: The code chunk below may take a few minutes to complete.
+
+```{r, solution_04b_1, eval=TRUE}
+train_test_lasso_results <- purrr::map_dfr(lambda_grid,
+                                           train_and_test_regularized,
+                                           train_data = dfA_train,
+                                           test_data = dfA_test,
+                                           loss_func = loss_lasso)
+```
+
+A glimpse of the train/test assessment results is shown to the screen below. The result is a dataframe (tibble) with two columns. The `lambda` column is the regularization strength and `MSE_test` is the MSE on the test set.
+
+```{r, solution_04b_2, eval=TRUE}
+train_test_lasso_results %>% glimpse()
+```
+
+You must visualize the test set performance by plotting the hold-out test MSE with respect to the log of the regularization strength.
+
+**Create a line plot in `ggplot2` to visualize the hold-out test MSE vs the log of the regularization strength.**
+
+**Which** $\lambda$ value yields the best test set performance?
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+train_test_lasso_results %>%
+  ggplot(mapping = aes(x = log(lambda), y = MSE_test)) + 
+  geom_line()
+```
+
+Which $\lambda$ is the best?
+
+The best lambda is:
+
+```{r}
+best_lambda_lasso <- train_test_lasso_results[which.min(train_test_lasso_results$MSE_test),][1] %>% pull()
+best_lambda_lasso 
+```
+
+### 4c)
+
+**You must now compare the Lasso estimates associated with the best** $\lambda$ value to the MLEs.
+
+*HINT*: Remember that you already calculated the Lasso estimates for all $\lambda$ values within the `lasso_path_results` object. You just need to filter that object for the appropriate `lambda` value to identify the best Lasso estimates.
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+lasso_path_results %>% filter(near(lambda, best_lambda_lasso))
+```
+
+### 4d)
+
+You just used a train/test split to validate and tune a machine learning model! However, single train/test splits do not allow us to estimate the **reliability** of the performance. We are not able to state how **confident** we are in the finding the best $\lambda$ value in this case. Resampling methods, such as cross-validation, provide more robust and stable results compared to single train/test splits.
+
+However, you will not execute the Resampling manually. You will use the `cv.glmnet()` function from the `glmnet` library to manage cross-validation and "scoring" for you.
+
+The `glmnet` library is loaded for you in the code chunk below.
+
+```{r, load_glmnet}
+library(glmnet)
+```
+
+The `dfA_train` and `dfA_test` splits were randomly created by splitting a larger data set with an 80/20 train/test split. The code chunk below binds the rows together, recreating the original data set. This allows `cv.glmnet()` to manage splitting the original 120 observations rather than the smaller randomly created training set.
+
+```{r, remake_big_A_data}
+dfA <- dfA_train %>% bind_rows(dfA_test)
+```
+
+Let's start out by fitting the Lasso model directly with `glmnet` before executing the cross-validation. This way we can compare our previous Lasso path to the `glmnet` path!
+
+You need to create the design matrix consistent with the `glmnet` requirements before fitting the `glmnet` model. You must therefore create a new design matrix for the linear additive features for all inputs but **REMOVE** the intercept column from the design matrix.
+
+**Complete the code chunk below by defining the `glmnet` required design matrix, extracting the response vector, and then fitting the Lasso model with `glmnet`.**
+
+**Assign the `lambda_grid` object you created previously to the `lambda` argument within `glmnet()`. You are therefore using a custom `lambda` grid rather than the default set of `lambda` values.**
+
+#### SOLUTION
+
+```{r, solution_04d_1, eval=TRUE}
+Xenet <- model.matrix(y ~ . - 1, data = dfA)
+
+yenet <- dfA$y
+
+lasso_glmnet <- glmnet(Xenet, yenet, lambda = lambda_grid)
+```
+
+### 4e)
+
+**Use the `glmnet` default plot method to visualize the coefficient path for the `glmnet` trained Lasso model. You must assign the `xvar` argument in the plot function call to `'lambda'` to show the path consistent with your previous figures.**
+
+**How does the `glmnet` created coefficient path compare to Lasso coefficient path you created in Problem 3d)?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+lasso_glmnet %>% plot(xvar = 'lambda')
+```
+
+How do they compare?
+
+It is very similar.
+
+### 4f)
+
+Now it's time to tune the Lasso model with cross-validation. You will specifically use 5 fold cross-validation and you must use the same $\lambda$ search grid defined previously within `lambda_grid`.
+
+**Use the `cv.glmnet()` function to tune the Lasso model with 5-fold cross-validation and the defined search grid. Assign the `lambda_grid` object to the `lambda` argument within `cv.glmnet()`. Assign the result to the `lasso_cv` object.**
+
+**Plot the cross-validation results to the screen.**
+
+**How many non-zero features does the best Lasso model have? How many non-zero features does the Lasso model recommended by the 1-standard error rule have?**
+
+*NOTE*: The random seed is set for you below to force the splits to be the same every time you run the code chunk.
+
+#### SOLUTION
+
+```{r, solution_04f_1}
+set.seed(71231)
+```
+
+Add more chunks to complete the problem.
+
+```{r}
+lasso_cv <- cv.glmnet(Xenet, yenet, lambda = lambda_grid)
+lasso_cv %>% plot()
+```
+
+```{r}
+lasso_cv
+```
+
+### 4g)
+
+**Which inputs matter based on the tuned Lasso model?**
+
+#### SOLUTION
+
+Add your code chunks here and what do you think?
+
+```{r}
+lasso_cv %>% coef()
+```
+
+## Problem 05
+
+By default `glmnet` trains LASSO penalized models. You can could repeat the exercise for RIDGE penalized models to identify if the RIDGE penalty outperforms the LASSO penalty. However, you do **not** need to do that! The ELASTIC NET penalty **blends** or **mixes** the RIDGE and LASSO penalties! ELASTIC NET accomplishes this by including an additional tuning parameter, the **mixing fraction**, which controls the blending between the two. a MIXING FRACTION of 1 corresponds to LASSO while a MIXING FRACTION of 0 corresponds to RIDGE. The `glmnet` package refers to the MIXING FRACTION as the `alpha` parameter. Tuning the ELASTIC NET penalty therefore tunes the MIXING FRACTION, `alpha`, **and** the regularization strength, `lambda`. Tuning the ELASTIC NET penalty therefore selects whether you should use one penalty **or** if you need a mixture of the two!
+
+Tuning ELASTIC NET is rather tedious with `glmnet` directly. You will therefore use the `caret` package to manage the training, validation, and tuning of the ELASTIC NET model.
+
+The `caret` library is loaded for you in the code chunk below.
+
+```{r, load_caret}
+library(caret)
+```
+
+### 5a)
+
+You worked with `caret` in earlier assignments. You will use it again but now you are using resampling to **tune** two parameters, `alpha` and `lambda`, that dictate **how** the regression coefficients are estimated. Just as in earlier assignments, you must begin by specifying the resampling scheme or "how the training is *controlled*" by `caret`.
+
+**Specify the resampling scheme to be 5 fold with 5 repeats. Assign the result of the trainControl() function to the `my_ctrl_A` object. Specify the primary performance metric to be 'RMSE' and assign that to the `my_metric_A` object.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+my_ctrl_A <- caret::trainControl(method = 'cv', number = 5)
+my_metric_A <- 'RMSE'
+```
+
+### 5b)
+
+The ELASTIC NET model consists of 2 tuning parameters. By default. `caret` specifies a GRID or candidate set of tuning parameters to try. You will use this DEFAULT grid to gain experience TUNING the ELASTIC NET model. Programming examples provided in Canvas demonstrate how to create your own custom tuning grids if you are interested.
+
+You must train, assess, and tune an ELASTIC NET model using the default `caret` tuning grid. In the `caret::train()` function you must use the formula interface to specify a model with linear additive features derived from all inputs to predict the response `y`. You must use the entire data set, `dfA`. Assign the method argument to `'glmnet'` and set the metric argument to `my_metric`. You **MUST** also instruct `caret` to standardize the features by setting the `preProcess` argument equal to `c('center', 'scale')`. Assign the `trControl` argument to the `my_ctrl` object.
+
+**IMPORTANT**: The `caret::train()` function works with the formula interface. Even though you are using `glmnet` to fit the model, `caret` does not require you to organize the design matrix as required by `glmnet`! Thus, you do **NOT** need to remove the intercept when defining the formula to `caret::train()`!
+
+**Train, assess, and tune the `glmnet` elastic net model consisting of linear additive features using all inputs with the defined resampling scheme. Assign the result to the `enet_A` object and display the results to the screen.**
+
+#### SOLUTION
+
+The random seed is set for you for reproducibility.
+
+```{r, solution_05b}
+set.seed(1234)
+```
+
+```{r}
+# ?caret::train
+enet_A <- caret::train(y ~ ., data = dfA, 
+                       method = 'glmnet', 
+                       metric = my_metric_A, 
+                       trControl = my_ctrl_A, 
+                       preProcess = c('center', 'scale'))
+enet_A
+```
+
+### 5c)
+
+**Which tuning parameter combinations are considered to be the best?**
+
+**Is the best set of tuning parameters more consistent with Lasso or Ridge regression?**
+
+#### SOLUTION
+
+What do you think?
+
+### 5d)
+
+**Display the coefficients to the screen for the tuned ELASTIC NET model. Which coefficients are non-zero?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+enet_A$bestTune
+```
+
+```{r}
+enet_A$finalModel %>% coefplot::coefplot() 
+```
+
+### 5e)
+
+`caret` provides several useful helper functions for ranking the features based on their influence on the response. This is known as ranking the variable importances and the `varImp()` function will extract the variable importances from a model for you. Wrapping the `plot()` function around `varImp()` creates a figure showing the variable importances. By default, the displayed importance values are in a relative scale with 100 corresponding to the most important variable.
+
+**Plot the variable importances for the `caret` tuned ELASTIC NET model.**
+
+```{r}
+enet_A$finalModel %>% varImp() %>% plot()
+```
+
+#### SOLUTION
+
+Add your code chunks.
+
+### 5f)
+
+**What is the MOST IMPORTANT input?**
+
+**Are the variable importance rankings consistent with the coefficient magnitudes you printed to the screen in Problem 5d)?**
+
+#### SOLUTION
+
+What do you think?
+
+```{r}
+enet_A$finalModel %>% varImp() %>% arrange(desc(Overall)) 
+```
+
+## Problem 06
+
+Correlated features cause problems for many models. One approach to try and identify if the features correlation matters is through tuning the ELASTIC NET model. The elastic net blends RIDGE and LASSO penalties and involves two tuning parameters as described previously. Tuning the mixing fraction will help us identify if the feature correlation impacts the model behavior.
+
+The code chunk below reads in a data set that will let you practice working with correlated features.
+
+```{r, read_data_B}
+dfB <- readr::read_csv('hw09_probB.csv', col_names = TRUE)
+```
+
+The glimpse provided below shows there are 9 continuous inputs and 1 continuous response.
+
+```{r, show_B_glimpse}
+dfB %>% glimpse()
+```
+
+The reshaped long-format data set is created for you in the code chunk below. The response `y` is not stacked and thus the long-format includes all inputs, `x1` through `x9` stacked together.
+
+```{r, make_reshpae_B}
+lfB <- dfB %>% 
+  tibble::rowid_to_column() %>% 
+  pivot_longer(starts_with('x'))
+
+lfB %>% glimpse()
+```
+
+### 6a)
+
+**Create a scatter plot to show the relationship between the output and each input. Use the reshaped long-format data set to create facets for each input.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+lfB %>%
+  ggplot(mapping = aes(x = value, y = y)) +
+  geom_point() +
+  facet_wrap(~ name)
+```
+
+### 6b)
+
+You visualized the output to input relationships, but you must also examine the relationship between the inputs! The `cor()` function can be used to calculate the correlation matrix between all columns in a data frame.
+
+Correlation matrices are created from wide-format data and so you will use the original wide-format data, `dfB`, for this question instead of the long-format data, `lfB`.
+
+**Pipe `dfB` into `select()` and select all columns except the response `y`. Pipe the result to the `cor()` function and display the correlation matrix to screen.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+dfB %>% select(-y) %>%
+  cor()
+```
+
+### 6c)
+
+Rather than displaying the numbers of the correlation matrix, let's create a correlation plot to visualize the correlation coefficient between each pair of inputs. The `corrplot` package provides the `corrplot()` function to easily create clean and simple correlation plots. You do not have to load the `corrplot` package, instead you will call the `corrplot()` function from `corrplot` using the `::` operator. Thus, you will call the function as `corrplot::corrplot()`.
+
+The first argument to `corrplot::corrplot()` is a correlation matrix. You must therefore calculate the correlation matrix associated with a data frame and pass that matrix into `corrplot::corrplot()`.
+
+**You will create three correlation plots. For the first, use the default input arguments to `corrplot::corrplot()`. For the second, assign the `type` argument to `'upper'` to visualize the correlation plot as an upper-triangular matrix. For the third, assign the `type` argument to `'upper'` and assign the `method` argument to `'color'`.**
+
+**Based on your visualizations, are the inputs correlated?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+corrplot::corrplot(dfB %>% 
+                     select(-y) %>% 
+                     cor())
+```
+
+```{r}
+corrplot::corrplot(dfB %>% 
+                     select(-y) %>% 
+                     cor(),
+                   type = 'upper')
+```
+
+```{r}
+corrplot::corrplot(dfB %>% 
+                     select(-y) %>% 
+                     cor(),
+                   type = 'upper',
+                   method = 'color')
+```
+
+### 6d)
+
+The `corrplot::corrplot()` function can reorder correlation plots to group correlated variables in CLUSTERS. This can help us "see" correlation structure easier compared to keeping the variables in their original order.
+
+**Create the third correlation plot from 6c) again. However, you must set the `order` argument to `'hclust'` and the `hclust.method` argument to `'ward.D2'`.**
+
+*HINT*: Remember that the correlation matrix must be calculated first before calling `corrplot::corrplot()`!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+dfB %>% 
+  select(-y) %>% 
+  cor() %>%
+  corrplot::corrplot(type = 'upper',
+                     method = 'color',
+                   order = 'hclust',
+                   hclust.method = 'ward.D2')
+```
+
+### 6e)
+
+In lecture we discussed that we can easily create more features than inputs by considering interactions between the inputs! Thus, when exploring if feature correlation could impact model results, we should not simply examine the correlation between the inputs. We should also examine the correlation between the features derived from the inputs!
+
+For this problem, let's work with all pair wise interactions between the inputs. You should therefore create a model that has all main effects and all pair wise products between the inputs.
+
+**Define the design matrix that includes all main effects and pair wise produces between the inputs associated with `dfB`. Assign the result to the `XBpairs` objects.**
+
+**We are focused on exploring the relationship between the features and so you must remove the intercept column of ones from this design matrix.**
+
+**How many columns are in the design matrix?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+XBpairs <- model.matrix(y ~ (.)*(.) - 1, data = dfB) 
+XBpairs
+```
+
+```{r}
+XBpairs %>% ncol()
+```
+
+### 6f)
+
+**Create the correlation plot between all features in the `XBpairs` design matrix. Assign the `type` argument to `'upper'` and set the `method` argument to `'color'` in `corrplot::corrplot()` to visualize the correlation coefficients as colored square "tiles" within an upper triangular matrix.**
+
+*HINT*: Remember that the correlation matrix must be calculated first before calling `corrplot::corrplot()`!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+XBpairs %>%
+  
+  cor() %>%
+  corrplot::corrplot(type = 'upper',
+                     method = 'square')
+```
+
+### 6g)
+
+The `corrplot::corrplot()` function can reorder correlation plots to group correlated variables in clusters. This can help us "see" correlation structure easier compared to keeping the variables in their original order.
+
+**Create the correlation plot between all features in the `XBpairs` design matrix again. However, you should set the `order` argument to `'hclust'` and the `hclust.method` argument to `'ward.D2'`. Continue to set `method` to `'square'` and `type` to `'upper'`.**
+
+*HINT*: Remember that the correlation matrix must be calculated first before calling `corrplot::corrplot()`!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+XBpairs %>%
+  cor() %>%
+  corrplot::corrplot(order = 'hclust',
+                     hclust.method = 'ward.D2',
+                     method = 'square',
+                     type = 'upper')
+```
+
+### 6h)
+
+Your goal is to find out if the feature correlation impacts model behavior. Thus, you will NOT train a LASSO or RIDGE model. Instead, you will train, assess, and tune ELASTIC NET which blends LASSO and RIDGE for you! You will now use `caret` to tune the mixing fraction and regularization strength of the elastic net model.
+
+You must specify the resampling scheme that caret will use to train, assess, and tune a model.
+
+**Specify the resampling scheme to be 5 fold with 5 repeats. Assign the result of the `trainControl()` function to the `my_ctrl` object. Specify the primary performance metric to be `'RMSE'` and assign that to the `my_metric` object.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+my_ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 5)
+my_metric <- 'RMSE'
+```
+
+### 6i)
+
+You must train, assess, and tune an elastic model using the default `caret` tuning grid. In the `caret::train()` function you must use the formula interface to specify a model with all pair wise interactions to predict the response `y`. Assign the method argument to `'glmnet'` and set the metric argument to `my_metric`. You **must** also instruct `caret` to standardize the features by setting the `preProcess` argument equal to `c('center', 'scale')`. Assign the `trControl` argument to the `my_ctrl` object.
+
+**Important**: The `caret::train()` function works with the formula interface. Thus, even though you are using `glmnet` to fit the model, `caret` does **NOT** require you to organize the design matrix as required by `glmnet`! Thus, you do **NOT** need to remove the intercept when defining the formula to `caret::train()`!
+
+**Train, assess, and tune the `glmnet` elastic net model consisting of main effects and all pair wise interactions with the defined resampling scheme. Assign the result to the `enet_default` object and display the result to the screen.**
+
+**Which tuning parameter combinations are considered to be the best?**
+
+**Is the best set of tuning parameters more consistent with Lasso or Ridge regression?**
+
+**Does the feature correlation seem to be impacting model behavior in this application?**
+
+#### SOLUTION
+
+The random seed is set for you for reproducibility.
+
+```{r, solution_06h}
+set.seed(1234)
+```
+
+```{r}
+enet_default <-
+  caret::train(y ~ (.)*(.),
+               data = dfB,
+               method = 'glmnet',
+               metric = my_metric,
+               preProcess = c('center', 'scale'),
+              trainControl = my_ctrl)
+```
+
+```{r}
+enet_default$bestTune
+```
+
+### 6j)
+
+**Display the coefficients to the screen for the tuned elastic net model. Which coefficients are non-zero?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+enet_default$finalModel %>% coef(s = enet_default$bestTune$lambda)
+```
+
+```{r}
+enet_default$finalModel %>% coefplot::coefplot()
+```
+
+### 6k)
+
+`caret` provides several useful helper functions for ranking the features based on their influence on the response. This is known as ranking the variable importances and the `varImp()` function will extract the variable importances from a model for you. Wrapping the `varImp()` result with `plot()` will create a figure showing the variable importances. By default, the displayed importance values are in a relative scale with 100 corresponding to the most important variable.
+
+**Plot the variable importances for the `caret` tuned elastic net model. Are the rankings consistent with the magnitude of the coefficients you printed to the screen in Problem 6j)?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+enet_default %>% varImp() %>% plot()
+```
+
+### 6l)
+
+**You ranked the feature importance and identified the most important input. However, what must you keep in mind when INTERPRETING the feature rankings?**
+
+#### SOLUTION
+
+What do you think?
+
+## Problem 07
+
+We have focused heavily on working with continuous inputs this semester. However, linear models may also use **categorical inputs** as features. This problem introduces working with categorical inputs by fitting non-Bayesian linear models with `lm()`.
+
+The data you will work with is loaded for you in the code chunk below.
+
+```{r, read_data_C}
+dfC <- readr::read_csv('hw09_probC.csv', col_names = TRUE)
+```
+
+The glimpse shows there are two inputs, `x` and `v`, and one continuous response `y`. The `v` input is non-numeric.
+
+```{r, show_glimpse_C}
+dfC %>% glimpse()
+```
+
+### 7a)
+
+**Create a bar chart in `ggplot2` to show the counts associated with each unique value of the categorical variable `v`.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+dfC %>%
+  ggplot(mapping = aes(x = v)) +
+  geom_bar() 
+```
+
+### 7b)
+
+Next, let's focus on the relationship between the continuous output `y` and the continuous input `x`.
+
+**Create a scatter plot in `ggplot2` to the show relationship between `y` and `x`.**
+
+**Manually assign the marker `size` to 4.**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+dfC %>%
+  ggplot(mapping = aes(x = x, y = y)) +
+  geom_point(size = 4)
+```
+
+### 7c)
+
+It is important to consider if the output to input relationship depends on the categorical variable When working with **mixed** categorical and continuous inputs. A simple way to explore such an effect is by coloring the markers in a scatter plot by the categorical variable.
+
+**Repeat the same scatter plot between `y` and `x` that you created in 7b) but this time map the `color` aesthetic to the `v` categorical variable.**
+
+**Does the output to input relationship appear to vary across the levels (categories) of `v`?**
+
+*HINT*: Remember the importance of the the `aes()` function!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+dfC %>%
+  ggplot(mapping = aes(x = x, y = y)) +
+  geom_point(size = 4, mapping = aes(color = v))
+```
+
+### 7d)
+
+Sometimes we need to include **smoothers** in our plots to help guide our interpretation of the trends. The `geom_smooth()` function allows adding a **smoothing** layer on top of a scatter plot. You used this function earlier in the semester and will use it now to help your exploration.
+
+**Repeat the same scatter plot between `y` and `x` that you created in 7c). You should thus continue to map `color` to the `v` variable. This time however, add in a `geom_smooth()` layer. Assign the `formula` argument to `y ~ x` and assign the `method` argument to `lm` (you do not need quotes). You must also map the `color` aesthetic to `v` within the `geom_smooth()` layer.**
+
+**Does the output to input relationship appear to vary across the levels (categories) of `v`?**
+
+*HINT*: Remember the importance of the `aes()` function!
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+dfC %>%
+  ggplot(mapping = aes(x = x, y = y)) +
+  geom_point(mapping = aes(color = v), size = 4) +
+  geom_smooth(formula = y ~ x, method = lm, mapping = aes(color = v))
+```
+
+### 7e)
+
+Let's fit two simple models for this application. The first will use linear additive features. Thus, you should add the effect of the continuous input `x` to the categorical input `v`.
+
+**Fit a non-Bayesian linear model to predict the response `y` based on linear additive features between the two inputs. Assign the model object to the `modC_add` object and display the model `summary()` to the screen.**
+
+**How many coefficients are estimated?**
+
+**What does the Intercept correspond to?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+# modC_add <- lm(y ~ x + v, data = dfC)
+modC_add <- caret::train(y ~ x + v,
+                         data = dfC,
+                         metric = my_metric,
+                         trainControl = my_ctrl)
+```
+
+```{r}
+modC_add %>% summary()
+```
+
+### 7f)
+
+Next, let's interact the categorical and continuous inputs!
+
+**Fit a non-Bayesian linear model to predict the response `y` based on interacting the categorical input `v` and the continuous input `x`. Your model should include all main effects and interaction features. Assign the model object to the `modC_int` object and display the model `summary()` to the screen.**
+
+**How many coefficients are estimated?**
+
+**What does the intercept correspond to?**
+
+#### SOLUTION
+
+Add your code chunks here.
+
+```{r}
+# modC_int <- lm(y ~ v * x, data = dfC)
+modC_int <- caret::train(y ~ v * x,
+                         data = dfC,
+                         metric= my_metric,
+                         trainControl = my_ctrl)
+```
+
+```{r}
+modC_int %>% summary()
+```
+
+### 7g)
+
+**Which of the two models, `modC_add` or `modC_int`, are better?**
+
+**Is your result consistent with the figure you created in 6d)?**
+
+#### SOLUTION
+
+Add code chunks here and what do you think?
+
+```{r}
+modC_int$results
+```
+
+```{r}
+modC_add$results
+```
+
+Clearly, the `modC_int` is the better model from RMSE and Rsquared metrics.

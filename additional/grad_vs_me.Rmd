@@ -1,0 +1,184 @@
+```{r}
+library(numDeriv)
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r}
+df <- readr::read_csv("../project/paint_project_train_data.csv", col_names = TRUE)
+```
+
+```{r}
+df_scaled <- df %>%
+  mutate(y = boot::logit(response / 100)) %>%
+  mutate(R = (R - mean(R)) / sd(R)) %>%
+  mutate(G = (G - mean(G)) / sd(G)) %>%
+  mutate(B = (B - mean(B)) / sd(B)) %>%
+  mutate(Hue = (Hue - mean(Hue)) / sd(Hue)) %>%
+  select(R, G, B, Hue, Saturation, Lightness, y, outcome)
+```
+
+```{r}
+lm_logpost <- function(unknowns, my_info)
+{
+  length_beta <- length(unknowns) - 1
+  
+  # extract the beta parameters from the `unknowns` vector
+  beta_v <- unknowns[1:length_beta] %>% as.matrix()
+  
+  # extract the unbounded noise parameter, varphi
+  lik_varphi <- unknowns[length(unknowns)]
+  
+  # back-transform from varphi to sigma
+  lik_sigma <- exp(lik_varphi)
+  
+  # extract design matrix
+  X <- my_info$design_matrix
+  
+  # calculate the linear predictor
+  mu <- X %*% beta_v
+  
+  # evaluate the log-likelihood
+  log_lik <- sum(dnorm(my_info$yobs, mean = mu, sd = lik_sigma, log = TRUE))
+  
+  # evaluate the log-prior
+  log_prior_beta <- sum(dnorm(beta_v, mean = my_info$mu_beta, sd = my_info$tau_beta, log = TRUE))
+  
+  log_prior_sigma <- dexp(lik_sigma, rate = my_info$sigma_rate, log = TRUE)
+  
+  # add the mean trend prior and noise prior together
+  log_prior <- log_prior_beta + log_prior_sigma
+  
+  # account for the transformation
+  log_derive_adjust <- lik_varphi
+  
+  # sum together
+  log_lik + log_prior + log_derive_adjust
+  
+}
+```
+
+```{r}
+X1 <- model.matrix(y ~ (Lightness + Saturation)*(R + G + B + Hue), data = df_scaled)
+info_X1 <- list(
+  yobs = df_scaled$y,
+  design_matrix = X1,
+  mu_beta = 0,
+  tau_beta = 5,
+  sigma_rate = 1
+)
+
+start_guess = c(rnorm(X1 %>% ncol()), 10)
+```
+
+```{r}
+grad_output <- grad(lm_logpost, x = start_guess, method="Richardson", my_info = info_X1)
+grad_output
+```
+
+```{r}
+my_grad <- function(unknowns, my_info) {
+  length_beta <- length(unknowns) - 1
+  
+  # extract the beta parameters from the `unknowns` vector
+  beta_v <- unknowns[1:length_beta] %>% as.matrix()
+  
+  # extract the unbounded noise parameter, varphi
+  lik_varphi <- unknowns[length(unknowns)]
+  
+  # back-transform from varphi to sigma
+  lik_sigma <- exp(lik_varphi)
+  
+  # extract design matrix
+  X <- my_info$design_matrix
+  
+  # calculate the linear predictor
+  mu <- X %*% beta_v
+  
+  y <- my_info$yobs %>% as.matrix()
+  
+  dbeta <-  (t(X) %*% (y - mu)) / lik_sigma^2 - (1 / (info_X1$tau_beta^2)) * (beta_v - info_X1$mu_beta)
+  
+  dphi <-(1 / lik_sigma ^ 2) * t(y - mu) %*% (y - mu) - my_info$sigma_rate * lik_sigma - X %>% nrow() + 1
+  
+
+  c(d_beta = dbeta, d_phi = dphi)
+}
+```
+
+```{r}
+my_grad_output <- my_grad(start_guess, info_X1)
+```
+
+```{r}
+my_grad_output
+```
+
+```{r}
+logistic_logpost <- function(unknowns, my_info)
+{
+  # extract the design matrix and assign to X
+  X <- my_info$design_matrix
+  
+  # calculate the linear predictor
+  eta <- as.vector( X %*% as.matrix(unknowns))
+  
+  # calculate the event probability
+  mu <- boot::inv.logit(eta)
+  
+  # evaluate the log-likelihood
+  log_lik <- sum(dbinom(x = my_info$yobs,
+                        size = 1, 
+                        prob = mu,
+                        log = TRUE))
+  
+  # evaluate the log-prior
+  log_prior <- sum(dnorm(x = unknowns,
+                         mean = my_info$mu_beta,
+                         sd = my_info$tau_beta,
+                         log = TRUE))
+  
+  # sum together
+  log_lik + log_prior
+}
+```
+
+```{r}
+info_logistic_X1 <- list(
+  yobs = df_scaled$outcome,
+  design_matrix = X1,
+  mu_beta = 0,
+  tau_beta = 5,
+  sigma_rate = 1
+)
+
+start_logistic_guess = rnorm(X1 %>% ncol())
+```
+
+```{r}
+grad(logistic_logpost, x = start_logistic_guess, method="Richardson", my_info = info_logistic_X1)
+```
+
+```{r}
+my_logistic_grad <- function(unknowns, my_info)
+{
+  # extract the design matrix and assign to X
+  X <- my_info$design_matrix
+  
+  beta <- unknowns %>% as.matrix()
+  
+  # calculate the linear predictor
+  eta <- as.vector( X %*% as.matrix(unknowns))
+  
+  # calculate the event probability
+  mu <- boot::inv.logit(eta)
+  
+  y <- my_info$yobs
+  
+  t(X) %*% (y - mu) - (1 / (my_info$tau_beta^2)) * (beta - my_info$mu_beta)
+}
+```
+
+```{r}
+my_logistic_grad(start_logistic_guess, info_logistic_X1)
+```
