@@ -1,0 +1,345 @@
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(caret)
+```
+
+```{r}
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+df_scaled <- df %>%
+  mutate(y = boot::logit(response / 100)) %>%
+  select(R, G, B, Hue, Saturation, Lightness,y, outcome) %>% 
+  mutate(outcome = ifelse(outcome == 1, 'event', 'non_event'),
+         outcome = factor(outcome, levels = c('event', 'non_event')))
+```
+
+### Loading models
+
+```{r}
+linear_models_names <- list(
+  'ENET_tune_1',
+'ENET_tune_2',
+'ENEET_default_1',
+'ENET_default_2',
+'LM_default_1',
+'LM_default_2',
+'LM_default_3',
+'LM_default_4',
+'NNET_default',
+'NNET_tune',
+'RF',
+'XGB_default',
+'XGB_tune',
+'reg_svm_linear',
+'reg_svm_poly',
+'reg_mars'
+)
+```
+
+```{r}
+logistic_models_roc_names <- list(
+  'glm_default_roc_1',
+    'glm_default_roc_2',
+    'glm_default_roc_3',
+    'glm_default_roc_4',
+    'enet_default_roc_1',
+    'enet_default_roc_2',
+    'enet_tune_roc_1',
+    'enet_tune_roc_2',
+    'nnet_default_roc',
+    'nnet_tune_roc',
+    'rf_default_roc',
+    'xgb_default_roc',
+    'xgb_tune_roc'
+)
+```
+
+```{r}
+logistic_models_acc_names <- list(
+  'glm_default_acc_1',
+    'glm_default_acc_2',
+    'glm_default_acc_3',
+    'glm_default_acc_4',
+    'enet_default_acc_1',
+    'enet_default_acc_2',
+    'enet_tune_acc_1',
+    'enet_tune_acc_2',
+    'nnet_default_acc',
+    'nnet_tune_acc',
+    'rf_default_acc',
+    'xgb_default_acc',
+    'xgb_tune_acc',
+    'cl_svm_linear',
+  'cl_svm_poly',
+  'cl_mars'
+)
+```
+
+```{r}
+load_rds_model <- function(name) {
+  readr::read_rds(paste(name, '.rds', sep = ''))
+}
+```
+
+```{r}
+linear_models <- tibble::tibble(
+  names = linear_models_names,
+  models = names %>% purrr::map(load_rds_model)
+)
+```
+
+```{r}
+logistic_models_acc <- tibble::tibble(
+  names = logistic_models_acc_names,
+  models = names %>% purrr::map(load_rds_model)
+)
+```
+
+```{r}
+logistic_models_roc <- tibble::tibble(
+  names = logistic_models_roc_names,
+  models = names %>% purrr::map(load_rds_model)
+)
+```
+
+### Choosing best models
+
+```{r}
+linear_resamples <- caret::resamples(setNames(linear_models$models, linear_models$names))
+```
+
+```{r}
+linear_resamples  %>% dotplot(metric = 'RMSE')
+```
+
+Best model is `LM_default_4`.
+
+```{r}
+logistic_resamples_acc <- resamples(setNames(logistic_models_acc$models, logistic_models_acc$names))
+```
+
+```{r}
+logistic_resamples_acc %>% dotplot(metric = 'Accuracy')
+```
+
+`XGB_default` is the best method.
+
+```{r}
+logistic_resamples_roc <- resamples(setNames(logistic_models_roc$models, logistic_models_roc$names))
+```
+
+```{r}
+logistic_resamples_roc %>% dotplot(metric = 'ROC')
+```
+
+`xgb_tune` is the best model.
+
+Since we know from the visualization that there is imbalance in the number of `events` and `non-events`, we must check the models individually.
+
+```{r}
+xgb_tune_roc <- logistic_models_roc$models[logistic_models_roc$names == 'xgb_tune_roc']
+```
+
+```{r}
+confusionMatrix(xgb_tune_roc[[1]])
+```
+
+```{r}
+xgb_default_acc <- logistic_models_acc$models[logistic_models_acc$names == 'xgb_default_acc']
+```
+
+```{r}
+confusionMatrix(xgb_default_acc[[1]])
+```
+
+Since it is harder to predict `event`, I will chose the model with the higher true positive event ratio, i.e. `xgb_tune_roc`.
+
+```{r}
+LM_default_4 <- linear_models$models[linear_models$names == 'LM_default_4']
+```
+
+### Variable importance
+
+```{r}
+xgb_tune_roc[[1]] %>% varImp() %>% plot()
+```
+
+```{r}
+LM_default_4[[1]] %>% varImp()
+```
+
+In the case of classification, we see that inputs from both models are important for the model. However, in regression task, we see that RGB model is dominant.
+
+Further we see that very few interaction elements are seen in either model, indicating that the inputs are sufficient to model the problem.
+
+### Difficult combinations
+
+Now I will try to see which combinations of `Lightness` and `Saturation` were the most difficult to predict.
+
+First we check for linear model.
+
+```{r}
+## make sure to filter from best model
+LM_default_4[[1]]$pred %>%
+  left_join(df_scaled %>% 
+              select(Lightness, Saturation, y) %>% 
+              mutate(rowIndex = row_number()),
+            by = 'rowIndex') %>%
+  mutate(error = abs(y - pred)) %>%
+  group_by(Lightness, Saturation, Resample) %>%
+  summarize(mean_value = mean(error)) %>%
+  group_by(Lightness, Saturation) %>%
+  summarize(standard_error = sd(mean_value),
+            final_mean = mean(mean_value)) %>%
+  ggplot(aes(y = final_mean, x = Lightness)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = final_mean - standard_error, ymax = final_mean +standard_error), color = 'blue', size = 0.5, height = 0) +
+  facet_wrap(~ Saturation) 
+```
+
+```{r}
+lm_average_preds <- LM_default_4[[1]]$pred %>%
+  left_join(df_scaled %>% 
+              select(Lightness, Saturation, y) %>% 
+              mutate(rowIndex = row_number()),
+            by = 'rowIndex') %>%
+  mutate(error = abs(y - pred)) %>%
+  group_by(Lightness, Saturation) %>%
+  summarize(mean_value = mean(error))
+```
+
+To classify the groups, I have considered those which have average error more than 1 standard deviation to be difficult to classify and vice versa.
+
+```{r}
+lm_sd <- (LM_default_4[[1]]$pred %>%
+  left_join(df_scaled %>% 
+              select(Lightness, Saturation, y) %>% 
+              mutate(rowIndex = row_number()),
+            by = 'rowIndex') %>%
+  mutate(error = abs(y - pred)))$error %>% sd()
+```
+
+```{r}
+lm_average_preds %>%
+  filter(mean_value >= lm_sd)
+```
+
+```{r}
+lm_average_preds %>%
+  filter(mean_value < lm_sd) %>%
+  arrange(mean_value)
+```
+
+Next I will check for the classification models.
+
+```{r}
+cl_average_preds <- xgb_tune_roc[[1]]$pred %>%
+  filter(nrounds == xgb_tune_roc[[1]]$bestTune$nrounds) %>%
+  filter(max_depth == xgb_tune_roc[[1]]$bestTune$max_depth) %>%
+  filter(eta == xgb_tune_roc[[1]]$bestTune$eta) %>%
+  left_join(df_scaled %>%
+              select(Lightness, Saturation, outcome) %>%
+              mutate(rowIndex = row_number()),
+            by = 'rowIndex') %>%
+  group_by(Lightness, Saturation) %>%
+  summarize(mean(pred != obs)) %>% arrange(`mean(pred != obs)`)
+##remove all interactions no need
+```
+
+```{r}
+cl_avg <- xgb_tune_roc[[1]]$pred %>%
+  filter(nrounds == xgb_tune_roc[[1]]$bestTune$nrounds) %>%
+  filter(max_depth == xgb_tune_roc[[1]]$bestTune$max_depth) %>%
+  filter(eta == xgb_tune_roc[[1]]$bestTune$eta) %>%
+  left_join(df_scaled %>%
+              select(Lightness, Saturation, outcome) %>%
+              mutate(rowIndex = row_number()),
+            by = 'rowIndex') %>%
+  summarize(mean(pred != obs))
+cl_avg[[1]]
+```
+
+```{r}
+### the worst ones
+cl_average_preds %>%
+  filter(`mean(pred != obs)` >= cl_avg[[1]]) %>%
+  arrange(desc(`mean(pred != obs)`))
+```
+
+```{r}
+### the best ones
+cl_average_preds %>%
+  filter(`mean(pred != obs)` < cl_avg[[1]]) %>%
+  arrange((`mean(pred != obs)`))
+```
+
+### Interpretations
+
+I will start with regression models.
+
+```{r}
+viz_grid <- expand.grid(
+  R = seq(0, 255, length.out = 101),
+  G = seq(0, 255, length.out = 101),
+  B = 127,
+  Hue = 20,
+  Saturation = c('bright', 'gray', 'muted', 'neutral', 'pure', 'shaded', 'subdued'),
+  Lightness = c('dark', 'deep', 'light', 'midtone', 'pale', 'saturated', 'soft'),
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+)
+```
+
+```{r}
+lm_pred <- predict(LM_default_4[[1]], newdata = viz_grid)
+```
+
+```{r}
+viz_grid %>%
+  mutate(prediction = lm_pred) %>%
+  ggplot(aes(x = G, y = R)) +
+  geom_raster(aes(fill = prediction)) + 
+  facet_grid(Lightness ~ Saturation) +
+  scale_fill_viridis_c()
+```
+
+```{r}
+viz_grid_2 <- expand.grid(
+  B = seq(0, 255, length.out = 101),
+  Hue = seq(0, 40, length.out = 101),
+  R = 127,
+  G = 127,
+  Saturation = c('bright', 'gray', 'muted', 'neutral', 'pure', 'shaded', 'subdued'),
+  Lightness = c('dark', 'deep', 'light', 'midtone', 'pale', 'saturated', 'soft'),
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+)
+```
+
+```{r}
+cl_pred <- predict(xgb_tune_roc[[1]], newdata = viz_grid_2, type = "prob")
+```
+
+```{r}
+viz_grid_2 %>%
+  mutate(outcome = cl_pred$event) %>% 
+  filter(Lightness == 'midtone', Saturation == 'neutral') %>%
+  ggplot(aes(x = Hue, y = B)) +
+  geom_raster(aes(fill = outcome)) + 
+  facet_grid(Lightness ~ Saturation) +
+  scale_fill_gradient2(low = 'blue', mid = 'white', high = 'red', midpoint = 0.5, 
+                       limits = c(0,1))
+```
+
+```{r}
+viz_grid_2 %>%
+  mutate(outcome = cl_pred$event) %>% 
+  filter(Lightness == 'saturated', Saturation == 'bright') %>%
+  ggplot(aes(x = Hue, y = B)) +
+  geom_raster(aes(fill = outcome)) + 
+  facet_grid(Lightness ~ Saturation)  +
+  scale_fill_gradient2(low = 'blue', mid = 'white', high = 'red', midpoint = 0.5, 
+                       limits = c(0,1))
+```
+
+From the surface plots of classification, it is very clear why the combination `neutral:midtone` is difficult to predict because of the presence of many different regions of high and low outcomes. On the other hand, the combination `bright:saturated` shows very similar values throughout which would make it easier to predict.

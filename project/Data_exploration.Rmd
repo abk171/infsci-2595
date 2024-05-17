@@ -1,0 +1,491 @@
+---
+title: "Kishor_Abhigyan_Project"
+author: "Abhigyan Kishor"
+date: "2023-11-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This example uses the `tidyverse` suite of packages.
+
+```{r, load_tidyverse}
+library(tidyverse)
+library(ggplot2)
+```
+
+### Read data
+
+The code chunk below reads in the final project data.
+
+```{r, read_final_data}
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+```
+
+```{r, show_data_glimpse}
+df %>% glimpse()
+```
+
+The data consist of continuous and categorical inputs. The `glimpse()` shown above reveals the data type for each variable which state to you whether the input is continuous or categorical. The RGB color model inputs, `R`, `G`, and `B` are continuous (dbl) inputs. The HSL color model inputs consist of 2 categorical inputs, `Lightness` and `Saturation`, and a continuous input, `Hue`. Two outputs are provided. The continuous output, `response`, and the Binary output, `outcome`. However, the data type of the Binary outcome is numeric because the Binary `outcome` is **encoded** as `outcome = 1` for the EVENT and `outcome = 0` for the NON-EVENT.
+
+## Phase 1: Data Exploration
+
+### Visualize distributions of the dataset
+
+#### Density/Histograms for continuous variables
+
+```{r}
+df %>% ggplot(aes(x = R)) + geom_histogram() 
+```
+
+```{r}
+df %>% ggplot(aes(x = G)) + geom_histogram()
+```
+
+```{r}
+df %>% ggplot(aes(x = B)) + geom_histogram()
+```
+
+Faceting against categorical variables does not give us notable results.
+
+```{r}
+df %>% ggplot(aes(x = R)) + geom_histogram() + facet_wrap(~Lightness)
+```
+
+```{r}
+df %>% ggplot(aes(x = R)) + geom_histogram() + facet_wrap(~ Saturation)
+```
+
+```{r}
+df %>% ggplot(aes(x = R)) + geom_histogram(aes(fill = Saturation)) + facet_wrap(~ Lightness)
+```
+
+```{r}
+df %>% ggplot(aes(x = Hue)) + geom_histogram()
+```
+
+Again faceting against categorical variables does not give us notable results
+
+```{r}
+df %>% ggplot(aes(x = Hue)) + geom_histogram() + facet_wrap(~ Saturation)
+```
+
+```{r}
+df %>% ggplot(aes(x = Hue)) + geom_histogram() + facet_wrap(~ Lightness)
+```
+
+```{r}
+df %>% ggplot(aes(x = Hue)) + geom_histogram(aes(fill = Saturation)) + facet_wrap(~ Lightness)
+```
+
+#### Counting the categorical variables.
+
+```{r}
+df %>% ggplot(aes(y = Saturation)) + geom_bar() 
+```
+
+```{r}
+df %>% ggplot(aes(y = Lightness)) + geom_bar()
+```
+
+### Condition the continuous variables on the categorical variables
+
+#### Converting to long form
+
+```{r}
+lf <- df %>% 
+  tibble::rowid_to_column() %>% 
+  pivot_longer(c(R, G, B, Hue))
+```
+
+#### Conditioning based on categorical inputs
+
+```{r}
+lf %>% ggplot(aes(x = name, y = value)) + geom_boxplot() + facet_wrap( ~ Lightness)
+```
+
+```{r}
+lf %>% ggplot(aes(x = name, y = value)) + geom_boxplot() + facet_wrap( ~ Saturation)
+```
+
+#### Conditioning based on the categorical output
+
+```{r}
+lf %>% ggplot(aes(x = name, y = value)) + geom_boxplot() + facet_wrap( ~ outcome)
+```
+
+### Relationship between continuous inputs
+
+#### Correlation plot
+
+```{r}
+df %>% 
+  select(R, G, B, Hue) %>% 
+  cor() %>%
+  corrplot::corrplot(type = 'upper',
+                     method = 'color')
+```
+
+#### Relationship between continuous inputs
+
+```{r}
+df %>% 
+  tibble::rowid_to_column() %>% 
+  pivot_longer(c(R, G, B)) %>% 
+  ggplot(aes(Hue, value)) + 
+  geom_point(aes(color = name), alpha = 0.3, size = 0.5) +
+  geom_smooth(aes(group = name), method = "glm", size = 0.5) +
+  scale_color_manual(values = list(
+  R = "red",
+  B = "blue",
+  G = "green"
+)) +
+  facet_wrap(~ Lightness)
+```
+
+```{r}
+df %>% 
+  tibble::rowid_to_column() %>% 
+  pivot_longer(c(R, G, B)) %>% 
+  ggplot(aes(Hue, value)) + 
+  geom_point(aes(color = name), alpha = 0.3, size = 0.5) +
+  geom_smooth(aes(group = name), method = "glm", size = 0.5) +
+  scale_color_manual(values = list(
+  R = "red",
+  B = "blue",
+  G = "green"
+)) +
+  facet_wrap(~ Saturation)
+```
+
+From the plots above, while we didnt see much correlation between RGB and Hue, by plotting RGB against Hue, facetted by the categorical variables we see more clear (linear) trends. Further, Lightness seems to give us better trends than Saturation.
+
+We can highlight this better when we choose values for saturation for the correlation plot.
+
+```{r}
+create_corr_mat <- function(f) {
+  df %>% 
+  filter(Lightness == f) %>%
+  select(R, G, B, Hue) %>% cor() %>%
+  as_tibble() %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(c(R,G,B,Hue)) %>%
+  mutate(value = round(value, digits = 3))
+}
+```
+
+```{r}
+tibble::tibble(
+  Lcat = unique(df$Lightness),
+  cors_long = purrr::map(Lcat, create_corr_mat)
+) %>%
+  unnest(cors_long) %>%
+  mutate(name = factor(name, levels = c('R','G','B','Hue'))) %>%
+  ggplot(aes(y = name, x = rowid, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = value), color = "white", size = 2) +
+  scale_fill_gradient2(high = "#053060",
+                       mid = "#FFFFFF",
+                       low = "#760C20") +
+  scale_x_reverse() +
+  facet_wrap(~ Lcat)
+```
+
+### Relationship between continuous output and input
+
+#### Without logit transformation
+
+For the RGB color scheme, I plot the `resposne` against `value`.
+
+```{r}
+lf %>%
+  filter(name != 'Hue') %>%
+  ggplot(aes(x = value, y = response)) +
+  geom_point(aes(group = Lightness, color = Lightness), alpha = 0.2) +
+  geom_smooth(aes(group = Lightness, color = Lightness), size = 0.5, method = 'glm') +
+  facet_wrap(~ name)
+```
+
+```{r}
+lf %>%
+  filter(name != 'Hue') %>%
+  ggplot(aes(x = value, y = response)) +
+  geom_point(aes(group = Saturation, color = Saturation), alpha = 0.2) +
+  geom_smooth(aes(group = Saturation, color = Saturation), size = 0.5) +
+  facet_wrap(~ name)
+```
+
+There is an increasing trend in response with respect to the RGB color scheme. When we facet the plot against `Lightness`, we see that lightness values divide the response values into levels. Whereas, when we facet against `Saturation`, we see the saturation values indicate the deviations from the trend.
+
+For HSL color scheme, I plot Hue against response. In the first plot, I group by `Lightness` and facet by `Saturation` and vice versa.
+
+```{r}
+lf %>%
+  filter(name == 'Hue') %>%
+  ggplot(aes(x = value, y = response)) +
+  geom_point(aes(color = Lightness), alpha = 0.4) +
+  geom_smooth(aes(group = Lightness, color = Lightness), size = 0.5, alpha = 0.2) +
+  facet_wrap(~ Saturation)
+```
+
+```{r}
+lf %>%
+  filter(name == 'Hue') %>%
+  ggplot(aes(x = value, y = response)) +
+  geom_point(aes(color = Saturation), alpha = 0.4) +
+  geom_smooth(aes(group = Saturation, color = Saturation), size = 0.5, alpha = 0.2) +
+  facet_wrap(~ Lightness)
+```
+
+We see that each combination has levels based on the grouping categories. From the two plots above, we can see that the `Saturation` of `pure` and `Lightness` of `pale` gives the best responses. Following is a plot with the corresponding RGB values.
+
+```{r}
+lf %>%
+  filter(name != 'Hue', Saturation == 'pure', Lightness == 'pale') %>%
+  ggplot(aes(x = value, y = response)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(size = 0.5, method = 'glm') +
+  facet_wrap(~ name)
+```
+
+When we see the y-axis values, it is clear that the response is very high for the above mentioned constraints.
+
+#### With logit transformation
+
+We apply logit transformation.
+
+```{r}
+lf %>%
+  filter(name != 'Hue') %>%
+  mutate(y = boot::logit( (response - 0) / (100 - 0) ) ) %>%
+  ggplot(aes(x = value, y = y)) +
+  geom_point() +
+  facet_wrap(~ name)
+```
+
+```{r}
+lf %>%
+  filter(name == 'Hue') %>%
+  mutate(y = boot::logit( (response - 0) / (100 - 0) ) ) %>%
+  ggplot(aes(x = value, y = y)) +
+  geom_point(aes(color = Lightness), alpha = 0.4) +
+  geom_smooth(aes(group = Lightness, color = Lightness), size = 0.5, alpha = 0.2) +
+  facet_wrap(~ Lightness)
+```
+
+```{r}
+lf %>%
+  filter(name == 'Hue') %>%
+  mutate(y = boot::logit( (response - 0) / (100 - 0) ) ) %>%
+  ggplot(aes(x = value, y = y)) +
+  geom_point(aes(color = Lightness), alpha = 0.4) +
+  geom_smooth(aes(group = Lightness, color = Lightness), size = 0.5, alpha = 0.2) +
+  facet_wrap(~ Saturation)
+```
+
+However, we don't observe noticeable impact on the plots.
+
+### Relationship between categorical output and inputs
+
+I first use HSL colors to see if there is a relation between `outcome` and `Hue`.
+
+```{r}
+lf %>%
+  filter(name == 'Hue') %>%
+  ggplot(mapping = aes(x = value, y = outcome)) + 
+  geom_jitter(height = 0.02, width = 0) + 
+  geom_smooth(formula = y ~ x + I(x^2), method = 'glm', method.args = list(family = 'binomial')) 
+```
+
+The first plot reveals that mostly the `outcome` is 0. I try to facet the plot according to the categorical varaibles `Saturation` and `Lightness`.
+
+```{r}
+lf %>%
+  filter(name == 'Hue') %>%
+  ggplot(mapping = aes(x = value, y = outcome)) + 
+  geom_jitter(mapping = aes(color = Saturation), height = 0.02, width = 0) + 
+  geom_smooth(aes(group = Saturation, color = Saturation), formula = y ~ x + I(x^2), method = 'glm', method.args = list(family = 'binomial')) +
+  facet_wrap(~ Saturation)
+```
+
+We see some trends, especially that `outcome` is 1 when `Saturation` is `"gray"`.
+
+```{r}
+lf %>%
+  filter(name == 'Hue') %>%
+  ggplot(mapping = aes(x = value, y = outcome)) + 
+  geom_jitter(mapping = aes(color = Lightness), height = 0.02, width = 0) + 
+  geom_smooth(aes(group = Lightness, color = Lightness), formula = y ~ x + I(x^2), method = 'glm', method.args = list(family = 'binomial')) +
+  facet_wrap(~ Lightness)
+```
+
+Here we some more relations but nothing concrete.
+
+Next, I will use the RGB color scheme to visualize `outcome`.
+
+```{r}
+lf %>%
+  filter(name != 'Hue') %>%
+  ggplot(aes(x = value, y = outcome)) +
+  geom_jitter(aes(color = name), height = 0.02, width = 0) +
+  geom_smooth(aes(group = name, color = name), formula = y ~ x + I(x^2), method = 'glm', method.args = list(family = 'binomial')) +
+  scale_color_manual(values = list(
+  R = "red",
+  B = "blue",
+  G = "green"
+)) +
+  facet_wrap(~ name)
+```
+
+We see some variation in the trends so lets checkout effects of the categorical inputs.
+
+```{r}
+lf %>%
+  filter(name != 'Hue') %>%
+  ggplot(aes(x = value, y = outcome)) +
+  geom_jitter(aes(color = Saturation), height = 0.02, width = 0, alpha = 0.2) +
+  geom_smooth(aes(group = Saturation, color = Saturation), formula = y ~ x + I(x^2), method = 'glm', method.args = list(family = 'binomial'), alpha = 0.1) +
+  facet_wrap(~ name)
+```
+
+```{r}
+lf %>%
+  filter(name != 'Hue') %>%
+  ggplot(aes(x = value, y = outcome)) +
+  geom_jitter(aes(color = Lightness), height = 0.02, width = 0, alpha = 0.2) +
+  geom_smooth(aes(group = Lightness, color = Lightness), formula = y ~ x + I(x^2), method = 'glm', method.args = list(family = 'binomial'), alpha = 0.1) +
+  facet_wrap(~ name)
+```
+
+We see that `Saturation` divides the outcome into levels from lowest probability of outcome to highest probability of outcome, whereas `Lightness` creates multimodal Gaussian like distributions.
+
+Finally, I visualize just the effects of the categorical variables on the `outcome`.
+
+```{r}
+df %>%
+  ggplot(aes(y = outcome)) +
+  geom_bar() +
+  facet_grid(Lightness ~ Saturation)
+```
+
+### Visualizing colors
+
+Finally, I wanted to see if i can visualize the colors we were working with.
+
+```{r}
+df %>% 
+  mutate(rgb_val = rgb(R,G,B,maxColorValue = 255) ) %>% 
+  mutate(x_val = rgb_val %>% substr(2,7) %>% strtoi(base = 16)) %>%
+  mutate(y = boot::logit( (response - 0) / (100 - 0) ) ) %>%
+  ggplot(aes(x = log(x_val), y = y)) + 
+  geom_point(aes(color = rgb_val)) +  
+  guides(color = "none")
+
+
+```
+
+```{r}
+df %>% 
+  mutate(rgb_val = rgb(R,G,B,maxColorValue = 255) ) %>% 
+  mutate(x_val = rgb_val %>% substr(2,7) %>% strtoi(base = 16)) %>%
+  ggplot(aes(x = log(x_val), y = outcome)) + 
+  geom_jitter(aes(color = rgb_val), height = 0.02, width = 0) + 
+  geom_smooth(formula = y ~ x + I(x*2), method = 'glm', method.args = list(family = 'binomial')) +
+  guides(color = "none")
+```
+
+### Transforming data
+
+Now that we have completed the data visualization, I will transform the (continuous) data variables to remove skew and multiple modes.
+
+I will first test logit transformations of all the variables. This is because we know the domain of the variables. `R`, `G`, `B` $\in$ [0,255] while `Hue` $\in$ [0,360].
+
+`R` does really well and we can see more central tendencies. On faceting with `Lightness`, we get more Gaussian looking trends.
+
+```{r}
+df %>% mutate(logit_R = boot::logit(R/255)) %>% ggplot(aes(x = logit_R)) + geom_histogram() 
+```
+
+```{r}
+df %>% mutate(logit_R = boot::logit(R/255)) %>% ggplot(aes(x = logit_R)) + geom_histogram() + facet_wrap(~ Lightness)
+```
+
+`G` does not do so well immediately. However, it shows better trends with faceting against `Lightness`.
+
+```{r}
+df %>% mutate(logit_G = boot::logit(G/255)) %>% ggplot(aes(x = logit_G)) + geom_histogram() 
+```
+
+```{r}
+df %>% mutate(logit_G = boot::logit(G/255)) %>% ggplot(aes(x = logit_G)) + geom_histogram() + facet_wrap(~ Lightness)
+```
+
+`B` shows similar trends.
+
+```{r}
+df %>% mutate(logit_B = boot::logit(B/255)) %>% ggplot(aes(x = logit_B)) + geom_histogram() 
+```
+
+```{r}
+df %>% mutate(logit_G = boot::logit(G/255)) %>% ggplot(aes(x = logit_G)) + geom_histogram() + facet_wrap(~ Lightness)
+```
+
+Hue becomes skewed after the `logit` transform. Faceting against the individual categories does not make a big difference
+
+```{r}
+df %>% mutate(logit_Hue = boot::logit(Hue/360)) %>% ggplot(aes(x = logit_Hue)) + geom_histogram() 
+```
+
+```{r}
+df %>% mutate(logit_Hue = boot::logit(Hue/360)) %>% ggplot(aes(x = logit_Hue)) + geom_histogram() + facet_wrap(~ Lightness)
+```
+
+```{r}
+df %>% mutate(logit_Hue = boot::logit(Hue/360)) %>% ggplot(aes(x = logit_Hue)) + geom_histogram() + facet_wrap(~ Saturation)
+```
+
+Faceting and coloring too does not reveal much trend.
+
+```{r}
+
+```
+
+I am satisfied with the results of `logit`. I am going to further transform the `Hue` using Box-Cox transform.
+
+```{r}
+df %>% 
+  mutate(Hue_logit = -1*boot::logit(Hue/360)) %>%
+  mutate(Hue_logit_BC = car::boxCoxVariable(Hue_logit)) %>% 
+  ggplot(aes(x = Hue_logit_BC)) + 
+  geom_histogram() 
+```
+
+```{r}
+df %>% 
+  mutate(R_BC = car::boxCoxVariable(R)) %>% 
+  ggplot(aes(x = R_BC)) + 
+  geom_histogram(bins = 10) 
+```
+
+That didnt work :(
+
+Finally I will visualize the logit output response with logit transformed inputs.
+
+```{r}
+df %>%
+  mutate(y = boot::logit(response/100)) %>%
+  mutate(R_logit = boot::logit(R/255)) %>%
+  mutate(G_logit = boot::logit(G/255)) %>%
+  mutate(B_logit = boot::logit(B/255)) %>%
+  mutate(Hue_logit = boot::logit(Hue/360)) %>%
+  select(y, R_logit, G_logit, B_logit, Hue_logit) %>%
+  tibble::rowid_to_column() %>% 
+  pivot_longer(c(R_logit, G_logit, B_logit, Hue_logit)) %>%
+  ggplot(mapping = aes(x = value, y = y)) +
+  geom_point() +
+  facet_wrap(~ name)
+```
+
+This is really good because we see extreme linearity against `R`, `G`, and `B` inputs. Understandably `Hue` alone would not be sufficient to predict the `response`.

@@ -1,0 +1,129 @@
+---
+title: "Logistic glm"
+author: "Abhigyan Kishor"
+date: "2023-11-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This example uses the `tidyverse` suite of packages.
+
+```{r, load_tidyverse}
+library(tidyverse)
+library(ggplot2)
+```
+
+### Read data
+
+The code chunk below reads in the final project data.
+
+```{r, read_final_data}
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+```
+
+```{r, show_data_glimpse}
+df %>% glimpse()
+```
+
+## Phase 3: Logistic Regression (general linear models)
+
+We first perform the logit transform and store results in `df_scaled`. Do logit then standardize.
+
+```{r}
+df_scaled <- df %>%
+  mutate(y = boot::logit( (response - 0) / (100 - 0) ) ) %>%
+  mutate(R = (R - mean(R)) / sd(R)) %>%
+  mutate(G = (G - mean(G)) / sd(G)) %>%
+  mutate(B = (B - mean(B)) / sd(B)) %>%
+  mutate(Hue = (Hue - mean(Hue)) / sd(Hue)) %>%
+  select(R, G, B, Hue, Saturation, Lightness, outcome)
+```
+
+```{r}
+glm_models <- tibble(
+  formula = c(
+    "outcome ~ 1",
+    "outcome ~ Lightness + Saturation",
+    "outcome ~ R + G + B + Hue",
+    "outcome ~ .",
+    "outcome ~ (Lightness + Saturation)*(R + G + B + Hue)",
+    "outcome ~ Lightness + Saturation + (R + G + B + Hue)*(R + G + B + Hue)",
+    "outcome ~ (Lightness + Saturation)*(R + G + B + Hue)*(R + G + B + Hue)",
+    "outcome ~ (Lightness)*(Saturation)*(R + G + B + Hue)*(R + G + B + Hue)",
+    "outcome ~ Lightness + Saturation + R + G + B + Hue + I(R^2) + I(G^2) + I(B^2) + I(Hue^2)",
+    "outcome ~ splines::ns(R + G + B, 4)"
+  )
+)
+```
+
+```{r}
+formula_to_glm_model <- function(form_str) {
+  form <- as.formula(form_str)
+  glm(form, data = df_scaled, family = 'binomial')
+}
+```
+
+```{r}
+glm_models <- glm_models %>% 
+  mutate(models = purrr::map(formula, formula_to_glm_model)) %>% 
+  mutate(model_glance = map(models, broom::glance)) %>% 
+  unnest(model_glance) %>% 
+  mutate(names = c('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'))
+```
+
+```{r}
+top_glm_models <- glm_models %>% arrange((AIC)) %>% head(3) 
+```
+
+```{r}
+top_glm_models
+```
+
+```{r}
+get_sig_coefs <- function(model) {
+  (model %>%
+    summary())$coefficients %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "coef_name") %>% 
+    as_tibble() %>%
+    filter(`Pr(>|z|)` < 0.05)  
+}
+```
+
+```{r}
+top_glm_models %>% 
+  mutate(sig_coefs = purrr::map(models, get_sig_coefs)) %>%
+  unnest(sig_coefs) %>%
+  mutate(min1sd = Estimate - `Std. Error`) %>%
+  mutate(max1sd = Estimate + `Std. Error`) %>%
+  mutate(min2sd = Estimate - 2*`Std. Error`) %>%
+  mutate(max2sd = Estimate + 2*`Std. Error`) %>%
+  filter(max2sd * min2sd > 0) %>%   #they have the same sign = statistically significant
+  ggplot(mapping = aes(x = Estimate, y = coef_name)) +
+  geom_point(size = 1.5, color = 'blue') +
+  geom_errorbarh(aes(xmin = min2sd, xmax = max2sd), color = 'blue', size = 0.5, height = 0) +
+  geom_errorbarh(aes(xmin = min1sd, xmax = max1sd), color = 'blue', size = 1, height = 0) +
+  geom_vline(xintercept = 0, linetype = 'dashed', color = 'gray', size = 1) +
+  xlab('Value') + 
+  ylab('Coefficient') + 
+  labs(title = 'Coefficient Plot') +
+  facet_wrap(~ names)
+```
+
+```{r}
+top_glm_models %>% 
+  mutate(sig_coefs = purrr::map(models, get_sig_coefs)) %>%
+  unnest(sig_coefs) %>%
+  mutate(min1sd = Estimate - `Std. Error`) %>%
+  mutate(max1sd = Estimate + `Std. Error`) %>%
+  mutate(min2sd = Estimate - 2*`Std. Error`) %>%
+  mutate(max2sd = Estimate + 2*`Std. Error`) %>%
+  filter(max2sd * min2sd > 0) %>%  
+  arrange(`Pr(>|z|)`) %>%
+  mutate(coef_name = paste(coef_name, '_', names)) %>% 
+  head(10) %>% 
+  select(coef_name)
+```

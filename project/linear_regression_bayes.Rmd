@@ -1,0 +1,390 @@
+---
+title: "Regression bayes"
+author: "Abhigyan Kishor"
+date: "2023-11-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This example uses the `tidyverse` suite of packages.
+
+```{r, load_tidyverse}
+library(tidyverse)
+library(ggplot2)
+```
+
+### Read data
+
+The code chunk below reads in the final project data.
+
+```{r, read_final_data}
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+```
+
+```{r, show_data_glimpse}
+df %>% glimpse()
+```
+
+## Bayesian Linear Models
+
+I chose a slightly simplified version of the top model. However, Since Hue can have some correlation between R,G,B based on the Lightness and saturation values, so I want to remove as much correlation as possible.
+
+```{r}
+lm_logpost <- function(unknowns, my_info)
+{
+  length_beta <- length(unknowns) - 1
+  
+  # extract the beta parameters from the `unknowns` vector
+  beta_v <- unknowns[1:length_beta] %>% as.matrix()
+  
+  # extract the unbounded noise parameter, varphi
+  lik_varphi <- unknowns[length(unknowns)]
+  
+  # back-transform from varphi to sigma
+  lik_sigma <- exp(lik_varphi)
+  
+  # extract design matrix
+  X <- my_info$design_matrix
+  
+  # calculate the linear predictor
+  mu <- X %*% beta_v
+  
+  # evaluate the log-likelihood
+  log_lik <- sum(dnorm(my_info$yobs, mean = mu, sd = lik_sigma, log = TRUE))
+  
+  # evaluate the log-prior
+  log_prior_beta <- sum(dnorm(beta_v, mean = my_info$mu_beta, sd = my_info$tau_beta, log = TRUE))
+  
+  log_prior_sigma <- dexp(lik_sigma, rate = my_info$sigma_rate, log = TRUE)
+  
+  # add the mean trend prior and noise prior together
+  log_prior <- log_prior_beta + log_prior_sigma
+  
+  # account for the transformation
+  log_derive_adjust <- lik_varphi
+  
+  # sum together
+  log_lik + log_prior + lik_varphi
+  
+}
+```
+
+```{r}
+my_grad <- function(unknowns, my_info) {
+  length_beta <- length(unknowns) - 1
+  
+  # extract the beta parameters from the `unknowns` vector
+  beta_v <- unknowns[1:length_beta] %>% as.matrix()
+  
+  # extract the unbounded noise parameter, varphi
+  lik_varphi <- unknowns[length(unknowns)]
+  
+  # back-transform from varphi to sigma
+  lik_sigma <- exp(lik_varphi)
+  
+  # extract design matrix
+  X <- my_info$design_matrix
+  
+  # calculate the linear predictor
+  mu <- X %*% beta_v
+  
+  y <- my_info$yobs %>% as.matrix()
+  
+  dbeta <-  (t(X) %*% (y - mu)) / lik_sigma^2 - (1 / (info_X1$tau_beta^2)) * (beta_v - info_X1$mu_beta)
+  
+  dphi <-(1 / lik_sigma ^ 2) * t(y - mu) %*% (y - mu) - my_info$sigma_rate * lik_sigma - X %>% nrow() + 1
+  
+
+  c(d_beta = dbeta, d_phi = dphi)
+}
+```
+
+```{r}
+my_laplace <- function(start_guess, logpost_func, ...)
+{
+  # code adapted from the `LearnBayes`` function `laplace()`
+  
+  fit <- optim(start_guess,
+               logpost_func,
+               gr = my_grad,
+               ...,
+               method = "BFGS",
+               hessian = FALSE, #set to false
+               control = list(fnscale = -1, maxit = 1001, trace = 1))
+  #Use optimHess
+  fit_hess <- optimHess(par = fit$par, fn = logpost_func, gr = my_grad, ...)
+  mode <- fit$par
+  post_var_matrix <- -solve(fit_hess)
+  p <- length(mode)
+  int <- p/2 * log(2 * pi) + 0.5 * log(det(post_var_matrix)) + logpost_func(mode, ...)
+  # package all of the results into a list
+  list(mode = mode,
+       var_matrix = post_var_matrix,
+       log_evidence = int,
+       converge = ifelse(fit$convergence == 0,
+                         "YES", 
+                         "NO"),
+       iter_counts = as.numeric(fit$counts[1]))
+}
+```
+
+```{r}
+df_scaled <- df %>%
+  mutate(y = boot::logit(response / 100)) %>%
+  mutate(R = (R - mean(R)) / sd(R)) %>%
+  mutate(G = (G - mean(G)) / sd(G)) %>%
+  mutate(B = (B - mean(B)) / sd(B)) %>%
+  mutate(Hue = (Hue - mean(Hue)) / sd(Hue)) %>%
+  select(R, G, B, Hue, Saturation, Lightness, y)
+```
+
+```{r}
+X1 <- model.matrix(y ~ (Lightness * Saturation)*(R + G + B + Hue)*(R + G + B + Hue), data = df_scaled)
+info_X1 <- list(
+  yobs = df_scaled$y,
+  design_matrix = X1,
+  mu_beta = 0,
+  tau_beta = 5,
+  sigma_rate = 1
+)
+```
+
+```{r}
+bayes_1 <- my_laplace(start_guess = c(rnorm(X1 %>% ncol()), 10),
+                      logpost_func = lm_logpost,
+                      my_info = info_X1)
+```
+
+```{r}
+X2 <- model.matrix(y ~ (Lightness + Saturation)*(R + G + B + Hue), data = df_scaled)
+info_X2 <- list(
+  yobs = df_scaled$y,
+  design_matrix = X2,
+  mu_beta = 0,
+  tau_beta = 5,
+  sigma_rate = 1
+)
+```
+
+```{r}
+bayes_2 <- my_laplace(start_guess = c(rnorm(X2 %>% ncol()), 10), logpost_func = lm_logpost, info_X2)
+```
+
+```{r}
+bayes_1$log_evidence
+```
+
+```{r}
+bayes_2$log_evidence
+```
+
+Based on the log evidence values, the simpler model is the better model.
+
+```{r}
+tibble::tibble(
+  modes = bayes_1$mode[-length(bayes_1$mode)],
+  coef_name = X1 %>% colnames(),
+  sds = sqrt(diag(bayes_1$var_matrix))[-length(bayes_1$mode)]
+) %>%
+  mutate(min1sd = modes - sds) %>%
+  mutate(max1sd = modes + sds) %>%
+  mutate(min2sd = modes - 2*sds) %>%
+  mutate(max2sd = modes + 2*sds) %>%
+  filter(max2sd * min2sd > 0) %>%   #they have the same sign = statistically significant
+  ggplot(mapping = aes(x = modes, y = coef_name)) +
+  geom_point(size = 1.5, color = 'blue') +
+  geom_errorbarh(aes(xmin = min2sd, xmax = max2sd), color = 'blue', size = 0.5, height = 0) +
+  geom_errorbarh(aes(xmin = min1sd, xmax = max1sd), color = 'blue', size = 1, height = 0) +
+  geom_vline(xintercept = 0, linetype = 'dashed', color = 'gray', size = 1) +
+  xlab('Value') + 
+  ylab('Coefficient') + 
+  labs(title = 'Coefficient Plot') 
+```
+
+```{r}
+tibble::tibble(
+  modes = bayes_2$mode[-length(bayes_2$mode)],
+  coef_name = X2 %>% colnames(),
+  sds = sqrt(diag(bayes_2$var_matrix))[-length(bayes_2$mode)]
+) %>%
+  mutate(min1sd = modes - sds) %>%
+  mutate(max1sd = modes + sds) %>%
+  mutate(min2sd = modes - 2*sds) %>%
+  mutate(max2sd = modes + 2*sds) %>%
+  filter(max2sd * min2sd > 0) %>%   #they have the same sign = statistically significant
+  ggplot(mapping = aes(x = modes, y = coef_name)) +
+  geom_point(size = 1.5, color = 'blue') +
+  geom_errorbarh(aes(xmin = min2sd, xmax = max2sd), color = 'blue', size = 0.5, height = 0) +
+  geom_errorbarh(aes(xmin = min1sd, xmax = max1sd), color = 'blue', size = 1, height = 0) +
+  geom_vline(xintercept = 0, linetype = 'dashed', color = 'gray', size = 1) +
+  xlab('Value') + 
+  ylab('Coefficient') + 
+  labs(title = 'Coefficient Plot') 
+```
+
+```{r}
+generate_lm_post_samples <- function(mvn_result, length_beta, num_samples)
+{
+  MASS::mvrnorm(n = num_samples,
+                mu = mvn_result$mode,
+                Sigma = mvn_result$var_matrix) %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    purrr::set_names(c(sprintf("beta_%02d", 0:(length_beta-1)), "varphi")) %>% 
+    mutate(sigma = exp(varphi))
+}
+```
+
+```{r}
+post_lm_pred_samples <- function(Xnew, Bmat, sigma_vector)
+{
+  # number of new prediction locations
+  M <- nrow(Xnew)
+  # number of posterior samples
+  S <- nrow(Bmat)
+  
+  # matrix of linear predictors
+  Umat <- Xnew %*% t(Bmat)
+  
+  # assmeble matrix of sigma samples, set the number of rows
+  Rmat <- matrix(rep(sigma_vector, M), M, byrow = TRUE)
+  
+  # generate standard normal and assemble into matrix
+  # set the number of rows
+  Zmat <- matrix(rnorm(M*S), M, byrow = TRUE)
+  
+  # calculate the random observation predictions
+  Ymat <- Umat + Rmat * Zmat
+  
+  # package together
+  list(Umat = Umat, Ymat = Ymat)
+}
+```
+
+```{r}
+make_post_lm_pred <- function(Xnew, post)
+{
+  Bmat <- post %>% select(starts_with("beta_")) %>% as.matrix()
+  
+  sigma_vector <- post %>% pull(sigma)
+  
+  post_lm_pred_samples(Xnew, Bmat, sigma_vector)
+}
+```
+
+```{r}
+summarize_lm_pred_from_laplace <- function(mvn_result, Xtest, num_samples)
+{
+  # generate posterior samples of the beta parameters
+  post <- generate_lm_post_samples(mvn_result, ncol(Xtest), num_samples)
+  
+  # make posterior predictions on the test set
+  pred_test <- make_post_lm_pred(Xtest, post)
+  
+  # calculate summary statistics on the predicted mean and response
+  # summarize over the posterior samples
+  
+  # posterior mean, should you summarize along rows (rowMeans) or 
+  # summarize down columns (colMeans) ???
+  mu_avg <- rowMeans(pred_test$Umat)
+  y_avg <- rowMeans(pred_test$Ymat)
+  
+  # posterior quantiles for the middle 95% uncertainty intervals
+  mu_lwr <- apply(pred_test$Umat, 1, stats::quantile, probs = 0.025)
+  mu_upr <- apply(pred_test$Umat, 1, stats::quantile, probs = 0.975)
+  y_lwr <- apply(pred_test$Ymat, 1, stats::quantile, probs = 0.025)
+  y_upr <- apply(pred_test$Ymat, 1, stats::quantile, probs = 0.975)
+  
+  # book keeping
+  tibble::tibble(
+    mu_avg = mu_avg,
+    mu_lwr = mu_lwr,
+    mu_upr = mu_upr,
+    y_avg = y_avg,
+    y_lwr = y_lwr,
+    y_upr = y_upr
+  ) %>% 
+    tibble::rowid_to_column("pred_id")
+}
+```
+
+```{r}
+"%w/o%" <- function(x, y) x[!x %in% y]
+c('R','G','B', 'Hue') %w/o% c('R', 'G')
+```
+
+```{r}
+form_1 <- '~ (Lightness + Saturation + Hue)*(R + G + B)'
+form_2 <- '~ (Lightness * Saturation)*(R + G + B + Hue)*(R + G + B + Hue)'
+```
+
+```{r}
+show_relations <- function(R_count, G_count, B_count, Hue_count, Saturation_count, Lightness_count, x_var, facet_var, form) {
+  sat_grid <- c('bright', 'gray', 'muted', 'neutral', 'pure', 'shaded', 'subdued')
+  light_grid <- c('dark', 'deep', 'light', 'midtone', 'pale', 'saturated', 'soft')
+  viz_grid <- expand.grid(R = seq(-3.2, 1.5, length.out = R_count),
+                        G = seq(-3.2, 1.5, length.out = G_count),
+                        B = seq(-3.2, 1.5, length.out = B_count),
+                        Hue = seq(-1.7, 1.9, length.out = Hue_count),
+                        Saturation = sat_grid,
+                        Lightness = light_grid,
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()
+  
+  X_test <- model.matrix( form %>% as.formula(), data = viz_grid)
+  
+  if(form == form_1) {
+    post_pred_summary <- summarize_lm_pred_from_laplace(bayes_2, X_test, 500)
+  }
+  else {
+    post_pred_summary <- summarize_lm_pred_from_laplace(bayes_1, X_test, 500)
+  }
+  
+  
+  
+  post_pred_summary %>% 
+  left_join(viz_grid %>% tibble::rowid_to_column("pred_id"),
+            by = 'pred_id') %>%
+    filter(Saturation == sat_grid[Saturation_count], Lightness == light_grid[Lightness_count]) %>%
+  ggplot(mapping = aes_string(x = x_var)) +
+  geom_ribbon(mapping = aes(ymin = y_lwr, ymax = y_upr), fill = 'orange') +
+  geom_ribbon(mapping = aes(ymin = mu_lwr, ymax = mu_upr), fill = 'grey', alpha = 0.9) +
+  geom_line(mapping = aes(y = mu_avg), alpha = 0.5) + 
+  facet_wrap(paste('~', facet_var) %>% as.formula())
+}
+```
+
+### Visualizing predictions
+
+I try to visualize relationship between `R` and `y` faceted with `G`.
+
+```{r}
+print(show_relations(30, 5, 1, 1, 1, 1, 'R', 'G', form_2))
+```
+
+```{r}
+print(show_relations(30, 5, 1, 1, 1, 1, 'R', 'G', form_2))
+```
+
+```{r}
+print(show_relations(30, 1, 1, 1, -1, 1, 'R', 'Saturation', form_2))
+```
+
+```{r}
+print(show_relations(1, 30, 1, 1, -1, 1, 'G', 'Saturation', form_2))
+```
+
+From these images, while we may have different levels of certainty depending on the inputs, however, the prediction interval is close to confidence interval. However, this does not mean we are very confident in our predictions as we can see very large intervals for some cases.
+
+```{r}
+generate_lm_post_samples(bayes_2, X2 %>% ncol(), 500) %>% 
+  select(sigma) %>%
+  ggplot(aes(x =sigma)) +
+  geom_histogram(bins = 55) +
+  geom_vline(xintercept = 0.05770369) ### this is the mle
+```
+
+So our model is more aligned with prior data.

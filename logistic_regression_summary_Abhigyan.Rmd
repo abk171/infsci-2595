@@ -1,0 +1,65 @@
+# Introduction to logistic regression
+
+### Abhigyan Kishor
+
+#### Summary
+
+```{r, include = FALSE}
+library(tidyverse)
+```
+
+Logistic regression involves modeling a regression problem to predict a binary outcome. Since our output is discrete, i.e. either 1 (event) or 0 (non-event), we use the **Bernoulli distribution** to compute the likelihood.
+
+$$
+p(y_n|\mu_n) = \text{Bernoulli}(y_n|\mu_n) = \mu_n^{y_n}(1-\mu_n)^{(1-y_n)}
+$$
+
+In logistic regression, we are predicting the probability of the event occurring (event probability). Since this probability must be bounded between 0 and 1, we cannot predict $\mu$ directly using linear techniques. Instead we apply a **logit transformation** to our linear predictor to limit the output to the range [0,1].
+
+$$
+\eta = \text{logit}(\mu) = \log\left[\frac{\mu}{1-\mu}\right]\quad \eta \in (-\infty,\infty)\\
+\mu = \text{logit}^{-1}(\eta) = \frac{\exp(\eta)}{1+\exp(\eta)} \quad \mu \in [0,1]
+$$
+
+```{r, echo = FALSE}
+tibble::tibble(
+  x = seq(0,1,length.out = 200)
+) %>%
+  mutate(y = boot::logit(x)) %>%
+  ggplot(mapping = aes(x = y, y = x)) +
+  geom_line() +
+  geom_hline(yintercept = 0.5, color = 'red') +
+  geom_hline(yintercept = 1) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0, color = 'red') +
+  xlab('logit(mu)') + 
+  ylab('mu') + 
+  ggtitle('Plot of mu values vs. the logit values')
+```
+
+In the case of logistic regression, we **do not apply derivative adjustment** for the transformation. This is because the The event probability is deterministically known if we know the input and the 𝜷's.
+
+We can consider the likelihood as a binomial distribution with trial size = 1. This way we can see that such a model **does not have a** $\sigma$ **value**. This is because for 1 trial it is impossible give a value for variance.
+
+Therefore we only need to learn the unknown linear model coefficients ( $\beta$ ). We will assume they can be modeled as **independent Gaussian distributions** with mean $\mu_{\beta}$ and standard deviation $\tau_{\beta}$. Thus the final model can be summarized as:
+
+$$
+p(y_n|\mu_n) \sim \text{Bernoulli}(y_n|\mu_n)\\
+\mu = \text{logit}^{-1}(\eta) \\
+\eta = X\beta\\
+p(\beta) = \prod_{d=0}^D(\text{normal}(\beta_d | \mu_{\beta},\tau_{\beta}))
+$$
+
+#### Questions:
+
+1.  Consider the following transformations. which is best suited to replace logit transformation used for logistic regression?
+    1.  1/x
+    2.  log(x)
+    3.  tanh(x)
+    4.  none of the above :)
+
+Answer: tanh(x)
+
+2.  [True/False] For the same number of training points, a linear regression model will have greater precision than a logistic regression model.
+
+Answer: True

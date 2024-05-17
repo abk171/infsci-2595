@@ -1,0 +1,138 @@
+```{r, load_tidyverse}
+library(tidyverse)
+library(ggplot2)
+library(caret)
+```
+
+### Read data
+
+The code chunk below reads in the final project data.
+
+```{r, read_final_data}
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+```
+
+```{r}
+df_scaled <- df %>%
+  mutate(y = boot::logit(response / 100)) %>%
+  select(R, G, B, Hue, Saturation, Lightness, outcome, y) %>% 
+  mutate(outcome = ifelse(outcome == 1, 'event', 'non_event'),
+         outcome = factor(outcome, levels = c('event', 'non_event')))
+```
+
+```{r}
+set.seed(1234)
+```
+
+```{r}
+my_ctrl_reg <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = 'all')
+my_ctrl_cl <- trainControl(method = 'repeatedcv', number = 5, repeats = 3, savePredictions = 'all')
+```
+
+### Support Vector Machine
+
+```{r}
+cl_svm_linear <- caret::train(
+  outcome ~ .,
+  data = df_scaled %>% select(-y),
+  method = 'svmLinear',
+  trControl = my_ctrl_cl,
+  metric = 'Accuracy',
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+cl_svm_poly <- caret::train(
+  outcome ~ .,
+  data = df_scaled %>% select(-y),
+  method = 'svmPoly',
+  trControl = my_ctrl_cl,
+  metric = 'Accuracy',
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+reg_svm_linear <- caret::train(
+  y ~ .,
+  data = df_scaled %>% select(-outcome),
+  method = 'svmLinear',
+  trControl = my_ctrl_reg,
+  metric = 'RMSE',
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+reg_svm_poly <- caret::train(
+  y ~ .,
+  data = df_scaled %>% select(-outcome),
+  method = 'svmPoly',
+  trControl = my_ctrl_reg,
+  metric = 'RMSE',
+  preProcess = c('center', 'scale')
+)
+```
+
+### MARS: Multivariate Adaptive Regression Splines
+
+```{r}
+reg_mars <- caret::train(
+  y ~ .,
+  data = df_scaled %>% select(-outcome),
+  method = 'earth',
+  trControl = my_ctrl_reg,
+  metric = 'RMSE'
+)
+```
+
+```{r}
+cl_mars <- caret::train(
+  outcome ~ .,
+  data = df_scaled %>% select(-y),
+  method = 'earth',
+  trControl = my_ctrl_cl,
+  metric = 'Accuracy'
+)
+```
+
+```{r}
+reg_resamples <- (resamples(
+  list(
+    REG_mars = reg_mars,
+  REG_svm_linear = reg_svm_linear,
+  REG_svm_poly = reg_svm_poly
+  )
+))
+```
+
+```{r}
+reg_resamples %>% dotplot(metric = 'RMSE')
+```
+
+```{r}
+cl_resamples <- resamples(
+  list(
+    CL_svm_linear = cl_svm_linear,
+    CL_svm_poly = cl_svm_poly,
+    CL_mars <- cl_mars
+  )
+)
+```
+
+```{r}
+cl_resamples %>% dotplot(metric = 'Accuracy')
+```
+
+```{r}
+readr::write_rds(reg_svm_linear, 'reg_svm_linear.rds')
+readr::write_rds(reg_svm_poly, 'reg_svm_poly.rds')
+readr::write_rds(reg_mars, 'reg_mars.rds')
+```
+
+```{r}
+readr::write_rds(cl_svm_linear, 'cl_svm_linear.rds')
+readr::write_rds(cl_svm_poly, 'cl_svm_poly.rds')
+readr::write_rds(cl_mars, 'cl_mars.rds')
+```

@@ -1,0 +1,355 @@
+---
+title: "Regression bayes"
+author: "Abhigyan Kishor"
+date: "2023-11-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This example uses the `tidyverse` suite of packages.
+
+```{r, load_tidyverse}
+library(tidyverse)
+library(ggplot2)
+```
+
+### Read data
+
+The code chunk below reads in the final project data.
+
+```{r, read_final_data}
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+```
+
+```{r, show_data_glimpse}
+df %>% glimpse()
+```
+
+```{r}
+df_scaled <- df %>%
+  mutate(y = boot::logit(response / 100)) %>%
+  mutate(R = (R - mean(R)) / sd(R)) %>%
+  mutate(G = (G - mean(G)) / sd(G)) %>%
+  mutate(B = (B - mean(B)) / sd(B)) %>%
+  mutate(Hue = (Hue - mean(Hue)) / sd(Hue)) %>%
+  select(R, G, B, Hue, Saturation, Lightness, y, outcome)
+```
+
+```{r}
+logistic_logpost <- function(unknowns, my_info)
+{
+  # extract the design matrix and assign to X
+  X <- my_info$design_matrix
+  
+  # calculate the linear predictor
+  eta <- as.vector( X %*% as.matrix(unknowns))
+  
+  # calculate the event probability
+  mu <- boot::inv.logit(eta)
+  
+  # evaluate the log-likelihood
+  log_lik <- sum(dbinom(x = my_info$yobs,
+                        size = 1, 
+                        prob = mu,
+                        log = TRUE))
+  
+  # evaluate the log-prior
+  log_prior <- sum(dnorm(x = unknowns,
+                         mean = my_info$mu_beta,
+                         sd = my_info$tau_beta,
+                         log = TRUE))
+  
+  # sum together
+  log_lik + log_prior
+}
+```
+
+```{r}
+my_logistic_grad <- function(unknowns, my_info)
+{
+  # extract the design matrix and assign to X
+  X <- my_info$design_matrix
+  
+  beta <- unknowns %>% as.matrix()
+  
+  # calculate the linear predictor
+  eta <- as.vector( X %*% as.matrix(unknowns))
+  
+  # calculate the event probability
+  mu <- boot::inv.logit(eta)
+  
+  y <- my_info$yobs
+  
+  t(X) %*% (y - mu) - (1 / (my_info$tau_beta^2)) * (beta - my_info$mu_beta)
+}
+```
+
+```{r}
+my_laplace <- function(start_guess, logpost_func, ...)
+{
+  # code adapted from the `LearnBayes`` function `laplace()`
+  
+  fit <- optim(start_guess,
+               logpost_func,
+               gr = my_logistic_grad,
+               ...,
+               method = "BFGS",
+               hessian = FALSE, #set to false
+               control = list(fnscale = -1, maxit = 1001, trace = 1))
+  #Use optimHess
+  fit_hess <- optimHess(par = fit$par, fn = logpost_func, gr = my_logistic_grad, ...)
+  mode <- fit$par
+  post_var_matrix <- -solve(fit_hess)
+  p <- length(mode)
+  int <- p/2 * log(2 * pi) + 0.5 * log(det(post_var_matrix)) + logpost_func(mode, ...)
+  # package all of the results into a list
+  list(mode = mode,
+       var_matrix = post_var_matrix,
+       log_evidence = int,
+       converge = ifelse(fit$convergence == 0,
+                         "YES", 
+                         "NO"),
+       iter_counts = as.numeric(fit$counts[1]))
+}
+```
+
+```{r}
+X1 <- model.matrix(outcome ~ (Lightness + Saturation)*(R + G + B + Hue)*(R + G + B + Hue), data = df_scaled)
+info_X1 <- list(
+  yobs = df_scaled$outcome,
+  design_matrix = X1,
+  mu_beta = 0,
+  tau_beta = 5
+)
+```
+
+```{r}
+bayes_1 <- my_laplace(rnorm(X1 %>% ncol()), logistic_logpost, info_X1)
+```
+
+I use a much simpler model. Since logistic regression requires more data than linear regression, I will also test a much more complex model.
+
+```{r}
+X2 <- model.matrix(outcome ~ (Lightness + Saturation + Hue)*(R + G + B), data = df_scaled)
+info_X2 <- list(
+  yobs = df_scaled$outcome,
+  design_matrix = X2,
+  mu_beta = 0,
+  tau_beta = 5
+)
+```
+
+```{r}
+bayes_2 <- my_laplace(rnorm(X2 %>% ncol()), logistic_logpost, info_X2)
+```
+
+```{r}
+X3 <- model.matrix(outcome ~ (Lightness * Saturation) * (R + G + B + Hue + I(R^2) + I(G^2) + I(B^2) + I(Hue^2))	
+, data = df_scaled)
+info_X3 <- list(
+  yobs = df_scaled$outcome,
+  design_matrix = X3,
+  mu_beta = 0,
+  tau_beta = 5
+)
+```
+
+```{r}
+bayes_3 <- my_laplace(rnorm(X3 %>% ncol()), logistic_logpost, info_X3)
+```
+
+```{r}
+bayes_1$log_evidence
+```
+
+```{r}
+bayes_2$log_evidence
+```
+
+```{r}
+bayes_3$log_evidence
+```
+
+```{r}
+tibble::tibble(
+  modes = bayes_1$mode,
+  coef_name = X1 %>% colnames(),
+  sds = sqrt(diag(bayes_1$var_matrix))
+) %>%
+  mutate(min1sd = modes - sds) %>%
+  mutate(max1sd = modes + sds) %>%
+  mutate(min2sd = modes - 2*sds) %>%
+  mutate(max2sd = modes + 2*sds) %>%
+  filter(max2sd * min2sd > 0) %>%   #they have the same sign = statistically significant
+  ggplot(mapping = aes(x = modes, y = coef_name)) +
+  geom_point(size = 1.5, color = 'blue') +
+  geom_errorbarh(aes(xmin = min2sd, xmax = max2sd), color = 'blue', size = 0.5, height = 0) +
+  geom_errorbarh(aes(xmin = min1sd, xmax = max1sd), color = 'blue', size = 1, height = 0) +
+  geom_vline(xintercept = 0, linetype = 'dashed', color = 'gray', size = 1) +
+  xlab('Value') + 
+  ylab('Coefficient') + 
+  labs(title = 'Coefficient Plot') 
+```
+
+```{r}
+tibble::tibble(
+  modes = bayes_2$mode,
+  coef_name = X2 %>% colnames(),
+  sds = sqrt(diag(bayes_2$var_matrix))
+) %>%
+  mutate(min1sd = modes - sds) %>%
+  mutate(max1sd = modes + sds) %>%
+  mutate(min2sd = modes - 2*sds) %>%
+  mutate(max2sd = modes + 2*sds) %>%
+  filter(max2sd * min2sd > 0) %>%   #they have the same sign = statistically significant
+  ggplot(mapping = aes(x = modes, y = coef_name)) +
+  geom_point(size = 1.5, color = 'blue') +
+  geom_errorbarh(aes(xmin = min2sd, xmax = max2sd), color = 'blue', size = 0.5, height = 0) +
+  geom_errorbarh(aes(xmin = min1sd, xmax = max1sd), color = 'blue', size = 1, height = 0) +
+  geom_vline(xintercept = 0, linetype = 'dashed', color = 'gray', size = 1) +
+  xlab('Value') + 
+  ylab('Coefficient') + 
+  labs(title = 'Coefficient Plot') 
+```
+
+```{r}
+tibble::tibble(
+  modes = bayes_3$mode,
+  coef_name = X3 %>% colnames(),
+  sds = sqrt(diag(bayes_3$var_matrix))
+) %>%
+  mutate(min1sd = modes - sds) %>%
+  mutate(max1sd = modes + sds) %>%
+  mutate(min2sd = modes - 2*sds) %>%
+  mutate(max2sd = modes + 2*sds) %>%
+  filter(max2sd * min2sd > 0) %>%   #they have the same sign = statistically significant
+  ggplot(mapping = aes(x = modes, y = coef_name)) +
+  geom_point(size = 1.5, color = 'blue') +
+  geom_errorbarh(aes(xmin = min2sd, xmax = max2sd), color = 'blue', size = 0.5, height = 0) +
+  geom_errorbarh(aes(xmin = min1sd, xmax = max1sd), color = 'blue', size = 1, height = 0) +
+  geom_vline(xintercept = 0, linetype = 'dashed', color = 'gray', size = 1) +
+  xlab('Value') + 
+  ylab('Coefficient') + 
+  labs(title = 'Coefficient Plot') 
+```
+
+From the coefficient plot, the simpler model has the most number of statistically significant parameters. Further, the complex models more uncertainty in the parameters.
+
+```{r}
+generate_glm_post_samples <- function(mvn_result, num_samples)
+{
+  # specify the number of unknown beta parameters
+  length_beta <- length(mvn_result$mode)
+  
+  # generate the random samples
+  beta_samples <- MASS::mvrnorm(n = num_samples,
+                                mu = mvn_result$mode,
+                                Sigma = mvn_result$var_matrix)
+  
+  # change the data type and name
+  beta_samples %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    purrr::set_names(sprintf("beta_%02d", (1:length_beta) - 1))
+}
+```
+
+```{r}
+post_logistic_pred_samples <- function(Xnew, Bmat)
+{
+  # calculate the linear predictor at all prediction points and posterior samples
+  eta_mat <- Xnew %*% t(Bmat)
+  
+  # calculate the event probability
+  mu_mat <- boot::inv.logit(eta_mat)
+  
+  # book keeping
+  list(eta_mat = eta_mat, mu_mat = mu_mat)
+}
+```
+
+```{r}
+summarize_logistic_pred_from_laplace <- function(mvn_result, Xtest, num_samples)
+{
+  # generate posterior samples of the beta parameters
+  betas <- generate_glm_post_samples(mvn_result, num_samples)
+  
+  # data type conversion
+  betas <- as.matrix(betas)
+  
+  # make posterior predictions on the test set
+  pred_test <- post_logistic_pred_samples(Xtest, betas)
+  
+  # calculate summary statistics on the posterior predicted probability
+  # summarize over the posterior samples
+  
+  # posterior mean, should you summarize along rows (rowMeans) or 
+  # summarize down columns (colMeans) ???
+  mu_avg <- rowMeans(pred_test$mu_mat)
+  
+  # posterior quantiles
+  mu_q05 <- apply(pred_test$mu_mat, 1, stats::quantile, probs = 0.05)
+  mu_q95 <- apply(pred_test$mu_mat, 1, stats::quantile, probs = 0.95)
+  
+  # book keeping
+  tibble::tibble(
+    mu_avg = mu_avg,
+    mu_q05 = mu_q05,
+    mu_q95 = mu_q95
+  ) %>% 
+    tibble::rowid_to_column("pred_id")
+}
+```
+
+```{r}
+form_1 <- '~ (Lightness + Saturation)*(R + G + B + Hue)*(R + G + B + Hue)'
+form_2 <- '~ (Lightness + Saturation + Hue)*(R + G + B)'
+```
+
+```{r}
+show_relations <- function(R_count, G_count, B_count, Hue_count, Saturation_count, Lightness_count, x_var, facet_var, form) {
+  sat_grid <- c('bright', 'gray', 'muted', 'neutral', 'pure', 'shaded', 'subdued')
+  light_grid <- c('dark', 'deep', 'light', 'midtone', 'pale', 'saturated', 'soft')
+  viz_grid <- expand.grid(R = seq(-3.2, 1.5, length.out = R_count),
+                        G = seq(-3.2, 1.5, length.out = G_count),
+                        B = seq(-3.2, 1.5, length.out = B_count),
+                        Hue = seq(-1.7, 1.9, length.out = Hue_count),
+                        Saturation = sat_grid,
+                        Lightness = light_grid,
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()
+  
+  X_test <- model.matrix( form %>% as.formula(), data = viz_grid)
+  
+  if(form == form_1) {
+    post_pred_summary <- summarize_logistic_pred_from_laplace(bayes_1, X_test, 500)
+  }
+  else {
+    post_pred_summary <- summarize_logistic_pred_from_laplace(bayes_2, X_test, 500)
+  }
+  
+  post_pred_summary %>% 
+  left_join(viz_grid %>% tibble::rowid_to_column("pred_id"),
+            by = 'pred_id') %>%
+    filter(Saturation == sat_grid[Saturation_count], Lightness == light_grid[Lightness_count]) %>%
+  ggplot(mapping = aes_string(x = x_var)) +
+  geom_ribbon(mapping = aes(ymin = mu_q05, ymax = mu_q95), fill = 'grey') +
+  geom_line(mapping = aes(y = mu_avg), alpha = 0.5) + 
+  facet_wrap(paste('~', facet_var) %>% as.formula())
+}
+```
+
+```{r}
+print(show_relations(1, 1, 1, 30, 1, -3, 'Hue', 'Lightness', form_1))
+```
+
+```{r}
+print(show_relations(1, 1, 1, 30, -5, 5, 'Hue', 'Saturation', form_2))
+```
+
+```{r}
+print(show_relations(30, 1, 1, 1, -5, 1, 'R', 'Saturation', form_2))
+```

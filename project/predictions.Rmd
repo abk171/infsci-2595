@@ -1,0 +1,49 @@
+```{r}
+library(tidyverse)
+library(caret)
+```
+
+```{r}
+holdout <- readr::read_csv('paint_project_holdout_data.csv', col_names = TRUE)
+```
+
+```{r}
+holdout_scaled <- holdout %>%
+  mutate(R = (R - mean(R)) / sd(R)) %>%
+  mutate(G = (G - mean(G)) / sd(G)) %>%
+  mutate(B = (B - mean(B)) / sd(B)) %>%
+  mutate(Hue = (Hue - mean(Hue)) / sd(Hue))
+```
+
+```{r}
+LM_default_4 <- readr::read_rds('LM_default_4.rds')
+```
+
+```{r}
+xgb_tune_roc <- readr::read_rds('xgb_tune_roc.rds')
+```
+
+```{r}
+lm_pred <- predict(LM_default_4, holdout_scaled)
+```
+
+```{r}
+cl_pred <- predict(xgb_tune_roc, holdout, type = 'prob')
+```
+
+```{r}
+my_preds <- tibble::tibble(
+  y = predict(LM_default_4, newdata = holdout_scaled),
+  outcome = predict(xgb_tune_roc, newdata = holdout)
+) %>% 
+  bind_cols(
+    predict(xgb_tune_roc, newdata = holdout, type = 'prob') %>% 
+      select(probability = event)
+  ) %>% 
+  tibble::rowid_to_column('id')
+```
+
+```{r}
+my_preds %>%
+  readr::write_csv('predictions.csv', col_names = TRUE)
+```

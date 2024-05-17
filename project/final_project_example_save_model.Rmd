@@ -1,0 +1,162 @@
+---
+title: "PPG Paint Colors: Final Project"
+subtitle: "Example: read data, save, and reload model object"
+author: "Dr. Joseph P. Yurko"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+This RMarkdown shows how to read in the final project data. It also shows how to calculate the logit-transformed response and setup the binary outcome for use with `caret` or `tidymodels`. It also demonstrates how to fit a simple model (with `lm()`), save that model, and load it back into the workspace. You may find these actions helpful as you work through the project.
+
+**You must download the data from Canvas and save the data in the same directory as this RMarkdown file.**
+
+## Load packages
+
+This example uses the `tidyverse` suite of packages.
+
+```{r, load_tidyverse}
+library(tidyverse)
+```
+
+## Read data
+
+Please download the final project data from Canvas. If this Rmarkdown file is located in the same directory as the downloaded CSV file, it will be able to load in the data for you. It is **highly** recommended that you use an RStudio RProject to easily manage the working directory and file paths of the code and objects associated with the final project.
+
+The code chunk below reads in the final project data.
+
+```{r, read_final_data}
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+```
+
+The `readr::read_csv()` function displays the data types and column names associated with the data. However, a glimpse is shown below that reveals the number of rows and also shows some of the representative values for the columns.
+
+```{r, show_data_glimpse}
+df %>% glimpse()
+```
+
+The data consist of continuous and categorical inputs. The `glimpse()` shown above reveals the data type for each variable which state to you whether the input is continuous or categorical. The RGB color model inputs, `R`, `G`, and `B` are continuous (dbl) inputs. The HSL color model inputs consist of 2 categorical inputs, `Lightness` and `Saturation`, and a continuous input, `Hue`. Two outputs are provided. The continuous output, `response`, and the Binary output, `outcome`. However, the data type of the Binary outcome is numeric because the Binary `outcome` is **encoded** as `outcome = 1` for the EVENT and `outcome = 0` for the NON-EVENT.
+
+## Regression task
+
+As stated in the project guidelines, you will **not** model the continuous output, `response`, directly. The `response` is a bounded variable between 0 and 100. The `response` must be transformed to an unbounded variable to appropriately be modeled by a Gaussian likelihood. We are making this transformation because we want the **uncertainty** in the predicted output to also satisfy output constraints. If we did not make this transformation the uncertainty could violate the bounds, which would mean the model is providing unphysical results! By logit-transforming `response`, we will fully respect the bounds of the output variable.
+
+The code chunk below assembles the data for Part ii) of the project. You should use this data set for all regression modeling tasks. The logit-transformed output is named `y`. The `dfii` dataframe as the original `response` and Binary output, `outcome`, removed. This way you can focus on the variables specific to the regression task.
+
+```{r, make_reg_data}
+dfii <- df %>% 
+  mutate(y = boot::logit( (response - 0) / (100 - 0) ) ) %>% 
+  select(R, G, B, 
+         Lightness, Saturation, Hue,
+         y)
+
+dfii %>% glimpse()
+```
+
+**Important**: It is up to you as to whether further preprocessing of the inputs are required before fitting the models.
+
+### Simple model
+
+You are going to fit many models in this project. Rather than having a single large RMarkdown that fits all models, it can be useful to work in a modular fashion. You can have separate RMarkdowns for different portions of the project. You can fit/train models, save them, and then load them in other RMarkdowns as needed. This example RMarkdown shows how to fit a simple linear model just to show the process of saving and loading the model object back in.
+
+I will not preprocess the inputs before fitting this model. Please note that you should consider if preprocessing would be useful or not! The code chunk below fits a linear model to predict the logit-transformed output `y` via a linear relationship to the `R` input. The result is assigned to the `mod01` object.
+
+```{r, fit_mod01}
+mod01 <- lm( y ~ R, data = dfii )
+```
+
+The model fitting results are summarized below with a call to the `summary()` function.
+
+```{r, show_mod01_summary}
+mod01 %>% summary()
+```
+
+### Save model
+
+Let's now save `mod01`. There are multiple approaches for saving objects including `.Rda` and `.rds`. I prefer to use the `.rds` object because it's more streamlined and makes it easier to save and reload a single object, which in our case is a model object. We can use the base `R` `saveRDS()` function or the `tidyverse` equivalent `write_rds()` function from the `readr` package. I prefer to use the `tidyverse` version.
+
+The code chunk below pipes the `mod01` object into `readr::write_rds()`. It saves the object to a file in the local working directory for simplicity. The local working directory is the directory of the RMarkdown within the RProject. Notice that the `.rds` extension is included after the desired file name.
+
+```{r, save_mod01}
+mod01 %>% readr::write_rds("my_simple_example_model.rds")
+```
+
+If you ran the above code chunk, check your working directory with the Files tab. You should see the `my_simple_example_model.rds` in your current working directory.
+
+### Reload model
+
+Let's now load in that model, but assign it to a different variable name. We can read in an `.rds` file with the `readr::read_rds()` function. The object is loaded in and assigned to the `re_load_mod01` object in the code chunk below.
+
+```{r, reload_mod01}
+re_load_mod01 <- readr::read_rds("my_simple_example_model.rds")
+```
+
+The `re_load_mod01` object is an `lm()` trained object!
+
+```{r, check_reload_class}
+re_load_mod01 %>% class()
+```
+
+We can work with the `re_load_mod01` object just like the original model, `mod01`. So we can use `summary()` and any other function on the model object, like `predict()`. To confirm let's print the summary below. If you compare the summary results to that printed previously you will see that the two are identical.
+
+```{r, show_reload_summary}
+re_load_mod01 %>% summary()
+```
+
+And to confirm let's check that the model objects are the same with the `all.equal()` function.
+
+```{r, check_mod01_equal}
+all.equal( mod01, re_load_mod01 )
+```
+
+## Binary classification task
+
+The Binary output variable, `outcome`, is a numeric variable.
+
+```{r, show_outcome_class}
+df %>% pull(outcome) %>% class()
+```
+
+However, there are **only** two unique values for `outcome`.
+
+```{r, show_outcome_values}
+df %>% count(outcome)
+```
+
+As stated previously, `outcome = 1` denotes the **EVENT** while `outcome = 0` denotes the **NON-EVENT**. Thus, the `outcome` variable uses the 0/1 encoding! This encoding is appropriate for `glm()` and the functions we create in homework assignments, and lecture examples. However, `caret` and `tidymodels` prefer a different encoding. For those reasons, two different binary classification data sets are defined. The first should be used for Parts iiiA) and iiiB) while the second should be used for iiiD).
+
+The data set associated with iiiA) and iiiB) is created for you below. It removes the `response` variable so that way you can focus on the inputs and binary outcome.
+
+```{r, make_iiiA_data}
+dfiiiA <- df %>% 
+  select(-response)
+
+dfiiiA %>% glimpse()
+```
+
+The data set associated with iiiD) changes the data type of the `outcome` variable. The `ifelse()` function is used to convert `outcome` to a character data type. The value of `outcome = 1` is converted to the string `'event'` and the value of `outcome = 0` is converted to `'non_event'`. The `outcome` data type is then converted to a factor (R's categorical variable data type) with `'event'` forced as the first level.
+
+```{r, make_iiiD_data}
+dfiiiD <- df %>% 
+  select(-response) %>% 
+  mutate(outcome = ifelse(outcome == 1, 'event', 'non_event'),
+         outcome = factor(outcome, levels = c('event', 'non_event')))
+
+dfiiiD %>% glimpse()
+```
+
+By converting `outcome` to a factor, the unique values of the variables are "always known":
+
+```{r, show_outcome_levels}
+dfiiiD %>% pull(outcome) %>% levels()
+```
+
+However, the value counts are the same as the original encoding.
+
+```{r, confirm_outcome_Counts}
+dfiiiD %>% count(outcome)
+```

@@ -1,0 +1,326 @@
+---
+title: "Regression caret"
+author: "Abhigyan Kishor"
+date: "2023-11-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This example uses the `tidyverse` suite of packages.
+
+```{r, load_tidyverse}
+library(tidyverse)
+library(ggplot2)
+library(caret)
+```
+
+### Read data
+
+The code chunk below reads in the final project data.
+
+```{r, read_final_data}
+df <- readr::read_csv("paint_project_train_data.csv", col_names = TRUE)
+```
+
+```{r}
+df_scaled <- df %>%
+  mutate(y = boot::logit( (response - 0) / (100 - 0) ) ) %>%
+  select(R, G, B, Hue, Saturation, Lightness, y)
+```
+
+## Linear Regression with `caret`
+
+```{r}
+my_metric <- "RMSE"
+my_ctrl <- caret::trainControl(
+  method = "repeatedcv",
+  number = 10,    # Number of folds
+  repeats = 3,     # Number of repeats
+  savePredictions = 'all'
+)
+```
+
+#### Linear models
+
+```{r}
+set.seed(1234)
+```
+
+```{r}
+lm_default_1 <- caret::train(
+  y ~ .,
+  data = df_scaled,
+  method = 'lm',
+  metric = my_metric,
+  trControl = my_ctrl,
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+lm_default_1 %>% varImp(top = 15) %>% plot()
+```
+
+```{r}
+lm_default_2 <- caret::train(
+  y ~ (R+G+B+Hue)*(R+G+B+Hue) + Saturation + Lightness,
+  data = df_scaled,
+  method = 'lm',
+  metric = my_metric,
+  trControl = my_ctrl,
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+lm_default_2 %>% varImp(top = 15) %>% plot()
+```
+
+```{r}
+lm_default_3 <- caret::train(
+  y ~ (Lightness)*(Saturation)*(R + G + B + Hue)*(R + G + B + Hue),
+  data = df_scaled,
+  method = 'lm',
+  metric = my_metric,
+  trControl = my_ctrl,
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+lm_default_3 %>% varImp(top = 15) %>% plot()
+```
+
+```{r}
+lm_default_4 <- caret::train(
+  y ~ (Lightness + Saturation)*(R + G + B + Hue),
+  data = df_scaled,
+  method = 'lm',
+  metric = my_metric,
+  trControl = my_ctrl,
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+lm_default_4 %>% varImp(top = 15) %>% plot()
+```
+
+#### Elastic net
+
+```{r}
+set.seed(1234)
+```
+
+```{r}
+enet_default_1 <- caret::train(
+  y ~ (R+G+B+Hue)*(R+G+B+Hue) + Saturation + Lightness,
+  data = df_scaled,
+  method = 'glmnet',
+  metric = my_metric,
+  trControl = my_ctrl,
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+enet_default_1 %>% varImp(top = 15) %>% plot()
+```
+
+```{r}
+enet_default_2 <- caret::train(
+  y ~ (Lightness)*(Saturation)*(R + G + B + Hue)*(R + G + B + Hue),
+  data = df_scaled,
+  method = 'glmnet',
+  metric = my_metric,
+  trControl = my_ctrl,
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+enet_default_2 %>% varImp(top = 15) %>% plot()
+```
+
+```{r}
+enet_grid_1 <- expand.grid(alpha = seq(0.1, 1.0, by = 0.1),
+                         lambda = exp(seq(log(min(enet_default_1$results$lambda)),
+                          log(max(enet_default_1$results$lambda)),
+                          length.out = 25)))
+```
+
+```{r}
+enet_grid_2 <- expand.grid(alpha = seq(0.1, 1.0, by = 0.1),
+                         lambda = exp(seq(log(min(enet_default_2$results$lambda)),
+                          log(max(enet_default_2$results$lambda)),
+                          length.out = 25)))
+```
+
+```{r}
+enet_tune_1 <- caret::train(
+  y ~ (R+G+B+Hue)*(R+G+B+Hue) + Saturation + Lightness,
+  data = df_scaled,
+  method = 'glmnet',
+  metric = my_metric,
+  trControl = my_ctrl,
+  tuneGrid = enet_grid_1,
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+enet_tune_1 %>% varImp(top = 15) %>% plot()
+```
+
+```{r}
+enet_tune_2 <- caret::train(
+  y ~ (Lightness)*(Saturation)*(R + G + B + Hue)*(R + G + B + Hue),
+  data = df_scaled,
+  method = 'glmnet',
+  metric = my_metric,
+  trControl = my_ctrl,
+  tuneGrid = enet_grid_2,
+  preProcess = c('center', 'scale')
+)
+```
+
+```{r}
+enet_tune_2 %>% varImp(top = 15) %>% plot()
+```
+
+#### Neural net
+
+```{r}
+set.seed(1234)
+```
+
+```{r}
+nnet_default <- caret::train(y ~ ., data = df_scaled,
+                             metric = my_metric,
+                             trControl = my_ctrl,
+                             method = 'nnet',
+                             preProcess = c('center', 'scale'),
+                             trace = FALSE)
+```
+
+```{r}
+nnet_default %>% varImp(top = 15) %>% plot()
+```
+
+```{r}
+nnet_grid <- expand.grid(size = c(5,9,13,17,21),
+                         decay = exp(seq(-6, 0, length.out = 11)))
+```
+
+```{r}
+nnet_tune <- caret::train(y ~ ., data = df_scaled,
+                          metric = my_metric,
+                          trControl = my_ctrl,
+                          method = 'nnet',
+                          preProcess = c('center', 'scale'),
+                          trace = FALSE,
+                          tuneGrid = nnet_grid)
+```
+
+```{r}
+nnet_tune %>% varImp(top = 15) %>% plot()
+```
+
+#### Random Forest
+
+```{r}
+rf_default <- caret::train(y ~ ., data = df_scaled,
+                           method = 'rf',
+                           importance = TRUE,
+                           metric = my_metric,
+                           trControl = my_ctrl,
+                           trace = FALSE)
+```
+
+```{r}
+rf_default %>% varImp(top = 15)) %>% plot()
+```
+
+#### XGBoost
+
+```{r}
+xgb_default <- caret::train(y ~ ., data = df_scaled,
+                            metric = my_metric,
+                            trControl = my_ctrl,
+                            method = 'xgbTree',
+                            verbosity = 0,
+                            nthread = 1)
+```
+
+```{r}
+xgb_default %>% varImp(top = 15)) %>% plot()
+```
+
+```{r}
+xgb_grid <- expand.grid(nrounds = seq(25, 50, by = 25),
+                        max_depth = c(3,6,9,12),
+                        eta = c(0.25, 0.5, 1) * xgb_default$bestTune$eta,
+                        gamma = xgb_default$bestTune$gamma,
+                        colsample_bytree = xgb_default$bestTune$colsample_bytree,
+                        min_child_weight = xgb_default$bestTune$min_child_weight,
+                        subsample = xgb_default$bestTune$subsample)
+```
+
+```{r}
+xgb_tune <- caret::train(y ~ ., data = df_scaled,
+                            metric = my_metric,
+                            trControl = my_ctrl,
+                            method = 'xgbTree',
+                            verbosity = 0,
+                            nthread = 1,
+                            tuneGrid = xgb_grid)
+```
+
+```{r}
+xgb_tune %>% varImp(top = 15) %>% plot()
+```
+
+#### Comparison
+
+```{r}
+caret_acc_compare <- resamples(list(ENET_tune_1 = enet_tune_1,
+                                    ENET_tune_2 = enet_tune_2,
+                                    ENEET_default_1 = enet_default_1,
+                                    ENET_default_2 = enet_default_2,
+                                    LM_default_1 = lm_default_1,
+                                    LM_default_2 = lm_default_2,
+                                    
+                                    LM_default_4 = lm_default_4,
+                                    NNET_default = nnet_default,
+                                    NNET_tune = nnet_tune,
+                                    RF = rf_default,
+                                    XGB_default = xgb_default,
+                                    XGB_tune = xgb_tune))
+```
+
+```{r}
+caret_acc_compare %>% dotplot(metric = 'RMSE')
+```
+
+```{r}
+lm_models <- list(ENET_tune_1 = enet_tune_1,
+ENET_tune_2 = enet_tune_2,
+ENEET_default_1 = enet_default_1,
+ENET_default_2 = enet_default_2,
+LM_default_1 = lm_default_1,
+LM_default_2 = lm_default_2,
+LM_default_3 = lm_default_3,
+LM_default_4 = lm_default_4,
+NNET_default = nnet_default,
+NNET_tune = nnet_tune,
+RF = rf_default,
+XGB_default = xgb_default,
+XGB_tune = xgb_tune)
+
+for(name in names(lm_models)) {
+  lm_models[[name]] %>% readr::write_rds(paste(name, '.rds', sep = ''))
+}
+```
